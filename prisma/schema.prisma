@@ -1,0 +1,114 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanName {
+  free
+  pro
+  business
+}
+
+enum UserRole {
+  client
+  admin
+}
+
+enum NotificationTypeEnum {
+  PLACEHOLDER // Temporary value, will be edited later
+}
+
+model plans {
+  id        Int       @id @default(autoincrement())
+  name      PlanName
+  features  Json
+  price     Decimal
+  is_active Boolean
+  
+  user_plans user_plans[]
+}
+
+model users {
+  id           BigInt   @id @default(autoincrement())
+  first_name   String
+  last_name    String
+  email        String   @unique
+  role         UserRole
+  password     String
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @updatedAt @db.Timestamptz(6)
+  phone_number String
+  
+  user_plans           user_plans[]
+  sent_messages        messages[]
+  notifications        notifications[]
+  conversations_as_p1  conversations[] @relation("ConversationParticipant1")
+  conversations_as_p2  conversations[] @relation("ConversationParticipant2")
+}
+
+model user_plans {
+  id         BigInt    @id @default(autoincrement())
+  user_id    BigInt
+  plan_id    Int
+  start_date DateTime
+  end_date   DateTime?
+  is_active  Boolean
+  
+  user users @relation(fields: [user_id], references: [id])
+  plan plans @relation(fields: [plan_id], references: [id])
+}
+
+model conversations {
+  id            Int       @id @default(autoincrement())
+  participant_1 BigInt
+  participant_2 BigInt
+  updated_at    DateTime  @default(now())
+  created_at    DateTime  @default(now())
+  
+  messages                messages[]
+  participant_1_user      users      @relation("ConversationParticipant1", fields: [participant_1], references: [id])
+  participant_2_user      users      @relation("ConversationParticipant2", fields: [participant_2], references: [id])
+}
+
+model messages {
+  id              BigInt    @id @default(autoincrement())
+  is_read         Boolean   @default(false)
+  sent_at         DateTime  @default(now())
+  conversation_id Int
+  has_attachment  Boolean
+  sender_id       BigInt
+  message         String
+  
+  message_attachment message_attachment[]
+  conversation       conversations        @relation(fields: [conversation_id], references: [id])
+  sender             users                @relation(fields: [sender_id], references: [id])
+}
+
+model message_attachment {
+  id             BigInt   @id @default(autoincrement())
+  message_id     BigInt
+  attachment_url String
+  uploaded_at    DateTime @default(now())
+  
+  message messages @relation(fields: [message_id], references: [id])
+}
+
+model notifications {
+  id         BigInt               @id @default(autoincrement())
+  user_id    BigInt
+  type       NotificationTypeEnum
+  title      String
+  message    String?
+  is_read    Boolean              @default(false)
+  created_at DateTime             @default(now())
+  
+  user users @relation(fields: [user_id], references: [id])
+}
+
