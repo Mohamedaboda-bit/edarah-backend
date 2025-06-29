@@ -19,6 +19,7 @@ enum PlanName {
 enum UserRole {
   client
   admin
+  support
 }
 
 enum NotificationTypeEnum {
@@ -31,6 +32,7 @@ model plans {
   features  Json
   price     Decimal
   is_active Boolean
+  token_limit Int
   
   user_plans user_plans[]
 }
@@ -53,6 +55,7 @@ model users {
   conversations_as_p2  conversations[] @relation("ConversationParticipant2")
 }
 
+
 model user_plans {
   id         BigInt    @id @default(autoincrement())
   user_id    BigInt
@@ -60,6 +63,7 @@ model user_plans {
   start_date DateTime
   end_date   DateTime?
   is_active  Boolean
+  tokens_used Int       @default(0)
   
   user users @relation(fields: [user_id], references: [id])
   plan plans @relation(fields: [plan_id], references: [id])

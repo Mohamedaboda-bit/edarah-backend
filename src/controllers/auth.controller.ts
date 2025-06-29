@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 export const register = async (req: Request, res: Response) => {
   try {
     const { firstName, lastName, email, password, phoneNumber } = req.body;
-
+    
     // Validate input
     const validation = ValidationUtils.validateRegistrationInput({
       firstName,
