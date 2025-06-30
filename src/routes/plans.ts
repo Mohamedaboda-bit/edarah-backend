@@ -10,7 +10,6 @@ const router = express.Router();
 
 router.post('/buy/:id', authenticateToken,buyPlan);
 
-
 router.post('/addPlan', authenticateToken,requireAdmin, planController.addPlan);
 
 router.get('/listPlans', planController.listPlans);

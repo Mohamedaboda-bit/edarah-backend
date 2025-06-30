@@ -48,6 +48,7 @@ model users {
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   updated_at   DateTime @updatedAt @db.Timestamptz(6)
   phone_number String
+  db_connection_string String?
   
   user_plans           user_plans[]
   sent_messages        messages[]
