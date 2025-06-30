@@ -1,4 +1,5 @@
 import express from 'express';
+import * as planController from '../controllers/plan.controller';
 
 import { Request, Response } from 'express';
 
@@ -11,6 +12,9 @@ router.post('/buyPlan', async(req:Request,res:Response)=>{
 });
 
 
+router.post('/addPlan', planController.addPlan);
+
 
 export default router;
+
 
