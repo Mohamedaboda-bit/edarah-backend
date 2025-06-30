@@ -63,6 +63,7 @@ export const register = async (req: Request, res: Response) => {
       role: newUser.role,
       firstName:newUser.first_name,
       lastName:newUser.last_name,
+      phoneNumber:newUser.phone_number
     });
 
     // Return user data (without password) and token
@@ -130,6 +131,7 @@ export const login = async (req: Request, res: Response) => {
       role: user.role,
       firstName:user.first_name,
       lastName:user.last_name,
+      phoneNumber:user.phone_number
     });
 
     // Update last login timestamp
@@ -219,7 +221,8 @@ export const refreshToken = async (req: Request, res: Response) => {
         email: true,
         role: true,
         first_name: true,
-        last_name:true
+        last_name:true,
+        phone_number:true
       }
     });
 
@@ -237,6 +240,7 @@ export const refreshToken = async (req: Request, res: Response) => {
       role: user.role,
       firstName:user.first_name,
       lastName:user.last_name,
+      phoneNumber:user.phone_number
     });
 
     res.json({

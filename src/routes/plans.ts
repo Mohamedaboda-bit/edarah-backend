@@ -4,23 +4,11 @@ import { requireAdmin,authenticateToken } from '../middleware/auth';
 import { Request, Response } from 'express';
 import { prisma } from '..';
 import { success, error } from "../utils/responseHandler";
+import { buyPlan } from '../controllers/paymobController';
 const router = express.Router();
 
 
-router.post('/buy/:id', authenticateToken,async(req:Request,res:Response)=>{
-    const user_id = req.user
-    const id = Number(req.params.id);
-    console.log(id)
-    const plan = await prisma.plans.findFirst({
-      where: { id }
-    });
-    if (plan){
-
-    }else{
-        return error(res,"plan id not found",404);
-    }
-    
-});
+router.post('/buy/:id', authenticateToken,buyPlan);
 
 
 router.post('/addPlan', authenticateToken,requireAdmin, planController.addPlan);

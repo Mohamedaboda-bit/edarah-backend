@@ -8,6 +8,7 @@ export interface JWTPayload {
   role: UserRole;
   firstName:string;
   lastName:string;
+  phoneNumber:string;
 }
 
 export class AuthUtils {
