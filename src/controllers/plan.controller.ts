@@ -39,6 +39,20 @@ export const addPlan = async (req: Request, res: Response) => {
 }
 
 
+export const listPlans = async (req: Request, res: Response) => {
+    try {
+        const plans = await prisma.plans.findMany({
+            where: {
+                is_active: true
+            }
+        });
+        return res.status(200).json(plans);
+    } catch (error) {
+        console.error('Error listing plans:', error);
+        return res.status(500).json({ error: 'Failed to retrieve plans due to a server error.' });
+    }
+}
+
 
 
 

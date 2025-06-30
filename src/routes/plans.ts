@@ -2,7 +2,6 @@ import express from 'express';
 import * as planController from '../controllers/plan.controller';
 import { requireAdmin,authenticateToken } from '../middleware/auth';
 import { Request, Response } from 'express';
-import { authenticateToken } from '../middleware/auth';
 import { prisma } from '..';
 import { success, error } from "../utils/responseHandler";
 const router = express.Router();
@@ -25,6 +24,8 @@ router.post('/buy/:id', authenticateToken,async(req:Request,res:Response)=>{
 
 
 router.post('/addPlan', authenticateToken,requireAdmin, planController.addPlan);
+
+router.get('/listPlans', planController.listPlans);
 
 
 export default router;

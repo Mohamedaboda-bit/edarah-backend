@@ -27,11 +27,12 @@ enum NotificationTypeEnum {
 }
 
 model plans {
-  id        Int       @id @default(autoincrement())
-  name      PlanName
-  features  Json
-  price     Decimal
-  is_active Boolean
+  id          Int      @id @default(autoincrement())
+  name        PlanName
+  description String?
+  features    Json
+  price       Int
+  is_active   Boolean
   token_limit Int
   
   user_plans user_plans[]
