@@ -60,7 +60,9 @@ export const register = async (req: Request, res: Response) => {
     const token = AuthUtils.generateToken({
       userId: newUser.id.toString(),
       email: newUser.email,
-      role: newUser.role
+      role: newUser.role,
+      firstName:newUser.first_name,
+      lastName:newUser.last_name,
     });
 
     // Return user data (without password) and token
@@ -125,7 +127,9 @@ export const login = async (req: Request, res: Response) => {
     const token = AuthUtils.generateToken({
       userId: user.id.toString(),
       email: user.email,
-      role: user.role
+      role: user.role,
+      firstName:user.first_name,
+      lastName:user.last_name,
     });
 
     // Update last login timestamp
@@ -213,7 +217,9 @@ export const refreshToken = async (req: Request, res: Response) => {
       select: {
         id: true,
         email: true,
-        role: true
+        role: true,
+        first_name: true,
+        last_name:true
       }
     });
 
@@ -228,7 +234,9 @@ export const refreshToken = async (req: Request, res: Response) => {
     const newToken = AuthUtils.generateToken({
       userId: user.id.toString(),
       email: user.email,
-      role: user.role
+      role: user.role,
+      firstName:user.first_name,
+      lastName:user.last_name,
     });
 
     res.json({
