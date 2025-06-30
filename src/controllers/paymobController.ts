@@ -8,14 +8,6 @@ import { JWTPayload } from "../utils/auth";
 // Initialize Prisma client
 const prisma = new PrismaClient();
 
-// Define interfaces
-interface AuthenticatedUser {
-  userId: number;
-  email: string;
-  role: string;
-  firstName: string;
-  lastName: string;
-}
 
 export const buyPlan = async (req: Request<{ id: string }>, res: Response) => {
   try {

@@ -58,17 +58,20 @@ model users {
 
 
 model user_plans {
-  id         BigInt    @id @default(autoincrement())
-  user_id    BigInt
-  plan_id    Int
-  start_date DateTime
-  end_date   DateTime?
-  is_active  Boolean
-  tokens_used Int       @default(0)
-  
-  user users @relation(fields: [user_id], references: [id])
-  plan plans @relation(fields: [plan_id], references: [id])
+  id           BigInt    @id @default(autoincrement())
+  user_id      BigInt
+  plan_id      Int
+  start_date   DateTime
+  end_date     DateTime?
+  is_active    Boolean
+  tokens_used  Int       @default(0)
+
+  user         users     @relation(fields: [user_id], references: [id])
+  plan         plans     @relation(fields: [plan_id], references: [id])
+
+  @@unique([user_id, plan_id])
 }
+
 
 model conversations {
   id            Int       @id @default(autoincrement())
