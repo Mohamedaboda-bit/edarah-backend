@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { plans, PrismaClient } from '@prisma/client';
+import { plans, PrismaClient } from "@prisma/client";
 import crypto from "crypto";
 import { paymobConfig } from "../configs/paymob";
 import { JWTPayload } from "../utils/auth";
@@ -8,7 +8,8 @@ import { JWTPayload } from "../utils/auth";
 const prisma = new PrismaClient();
 
 interface PaymobWebhookPayload {
-  transaction: {
+  type: string;
+  obj: {
     id: number;
     amount_cents: number;
     currency: string;
@@ -16,22 +17,26 @@ interface PaymobWebhookPayload {
     error_occured: boolean;
     created_at: string;
     integration_id: number;
-  };
-  intention: {
-    id: string;
-    client_secret: string;
-    extras: {
-      creation_extras: {
-        user: JWTPayload;
+    payment_key_claims: {
+      extra: {
         plan: plans;
+        user: JWTPayload;
       };
+
+      Order_id: number;
+      amount_cents: number;
+      currency: string;
+      billing_data: any;
+      redirect_url: string;
+      integration_id: number;
+      lock_order_when_paid: boolean;
+      next_payment_intention: string;
+      single_payment_attempt: boolean;
     };
-    status: string;
-    confirmed: boolean;
-    amount: number;
-    currency: string;
   };
-  hmac: string;
+  accept_fees: number;
+  issuer_bank: string | null;
+  transaction_processed_callback_responses: string;
 }
 
 // HMAC verification function
@@ -50,31 +55,26 @@ const verifyHmac = (payload: any, hmac: string): boolean => {
   return calculatedHmac === hmac;
 };
 
-export const handleWebhook = async (req: Request, res: Response): Promise<void> => {
+export const handleWebhook = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
-    const { transaction, intention, hmac } = req.body as PaymobWebhookPayload;
-
+    const payload = req.body as PaymobWebhookPayload;
     // Validate payload
-    if (!transaction || !intention || !hmac) {
-      console.error("❌ Invalid webhook payload: missing transaction, intention, or hmac");
+    if (!payload.type || !payload.obj) {
+      console.error(
+        "❌ Invalid webhook payload: missing type or transaction object"
+      );
       res.status(400).send("Invalid payload");
       return;
     }
-
-    // Verify HMAC
-    if (!verifyHmac({ transaction, intention }, hmac)) {
-      console.error("❌ HMAC verification failed");
-      // we have issue here , but we will need to fix it later.
-      // res.status(401).send("Invalid HMAC");
-      // return;
-    }
-
-    const userId = intention.extras?.creation_extras?.user?.userId;
-    const planId = intention.extras?.creation_extras?.plan?.id;
-    const clientSecret = intention.client_secret;
+    const transaction = payload.obj;
+    const userId = transaction.payment_key_claims?.extra?.user?.userId;
+    const planId = transaction.payment_key_claims?.extra?.plan?.id;
     const paid = transaction.success;
 
-    if (!userId || !planId || !clientSecret) {
+    if (!userId || !planId) {
       console.error("❌ Missing required fields in webhook payload");
       res.status(400).send("Missing required fields");
       return;
@@ -101,38 +101,62 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
 
     // Log payment status
     if (paid) {
-      console.log(`✅ Payment SUCCESS by user ID: ${userId}, Plan ID: ${planId}, Transaction ID: ${transaction.id}`);
+      console.log(
+        `✅ Payment SUCCESS by user ID: ${userId}, Plan ID: ${planId}, Transaction ID: ${transaction.id}`
+      );
     } else {
-      console.error(`❌ Payment FAILED by user ID: ${userId}, Plan ID: ${planId}, Transaction ID: ${transaction.id}`);
+      console.error(
+        `❌ Payment FAILED by user ID: ${userId}, Plan ID: ${planId}, Transaction ID: ${transaction.id}`
+      );
     }
 
     // Optionally update user subscription status
-if (paid) {
-  await prisma.user_plans.upsert({
-    where: {
-      user_id_plan_id: {
-        user_id: BigInt(userId),
-        plan_id: planId,
-      },
-    },
-    update: {
-      is_active: true,
-      start_date: new Date(),
-      end_date: null,
-      tokens_used: 0,
-    },
-    create: {
-      user_id: BigInt(userId),
-      plan_id: planId,
-      is_active: true,
-      start_date: new Date(),
-      end_date: null,
-      tokens_used: 0,
-    },
-  });
-}
+    if (paid) {
+      // Check if user_id exists
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(userId) },
+      });
 
+      if (!user) {
+        console.error(`❌ User with ID ${userId} not found`);
+        res.status(400).send(`User with ID ${userId} not found`);
+        return;
+      }
 
+      // Check if plan_id exists
+      const plan = await prisma.plans.findUnique({
+        where: { id: planId },
+      });
+
+      if (!plan) {
+        console.error(`❌ Plan with ID ${planId} not found`);
+        res.status(400).send(`Plan with ID ${planId} not found`);
+        return;
+      }
+
+      await prisma.user_plans.upsert({
+        where: {
+          user_id_plan_id: {
+            user_id: BigInt(userId),
+            plan_id: planId,
+          },
+        },
+        update: {
+          is_active: true,
+          start_date: new Date(),
+          end_date: null,
+          tokens_used: 0,
+        },
+        create: {
+          user_id: BigInt(userId),
+          plan_id: planId,
+          is_active: true,
+          start_date: new Date(),
+          end_date: null,
+          tokens_used: 0,
+        },
+      });
+    }
 
     res.sendStatus(200);
   } catch (err: any) {
