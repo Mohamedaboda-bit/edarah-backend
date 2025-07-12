@@ -4,7 +4,11 @@ import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import authRoutes from './routes/auth';
 import plansRoutes from './routes/plans';
-import paymobWebhookRoutes from './routes/paymobWebook'
+import paymobWebhookRoutes from './routes/paymobWebook';
+import ragRoutes from './routes/rag';
+
+// Initialize LangChain configuration
+import './configs/langchain';
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +32,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/plan', plansRoutes);
 app.use('/api/paymob', paymobWebhookRoutes);
+app.use('/api/rag', ragRoutes);
 
 
 // Health check endpoint

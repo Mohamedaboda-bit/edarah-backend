@@ -27,13 +27,14 @@ enum NotificationTypeEnum {
 }
 
 model plans {
-  id          Int      @id @default(autoincrement())
-  name        PlanName
-  description String?
-  features    Json
-  price       Int
-  is_active   Boolean
-  token_limit Int
+  id                    Int      @id @default(autoincrement())
+  name                  PlanName
+  description           String?
+  features              Json
+  price                 Int
+  is_active             Boolean
+  token_limit           Int
+  database_limit_number Int      @default(1)
   
   user_plans user_plans[]
 }
@@ -48,9 +49,9 @@ model users {
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   updated_at   DateTime @updatedAt @db.Timestamptz(6)
   phone_number String
-  db_connection_string String?
   
   user_plans           user_plans[]
+  user_databases       user_databases[]
   sent_messages        messages[]
   notifications        notifications[]
   conversations_as_p1  conversations[] @relation("ConversationParticipant1")
@@ -71,6 +72,23 @@ model user_plans {
   plan         plans     @relation(fields: [plan_id], references: [id])
 
   @@unique([user_id, plan_id])
+}
+
+model user_databases {
+  id                    BigInt   @id @default(autoincrement())
+  user_id               BigInt
+  database_type         String   // "postgresql", "mysql", "mongodb", "sqlserver", "sqlite", etc.
+  connection_string     String   // Encrypted connection string
+  database_name         String?
+  schema_cache          Json?    // Cached schema for performance
+  last_schema_update    DateTime @default(now())
+  is_active             Boolean  @default(true)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt @db.Timestamptz(6)
+  
+  user                  users    @relation(fields: [user_id], references: [id])
+  
+  @@unique([user_id, database_name])
 }
 
 
