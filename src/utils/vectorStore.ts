@@ -9,6 +9,19 @@ export interface VectorStoreDocument {
   metadata: Record<string, any>;
 }
 
+// Helper to wrap async embedding for MemoryVectorStore
+function huggingFaceEmbeddingWrapper() {
+  return {
+    embedDocuments: async (texts: string[]) => {
+      return await getEmbeddings(texts);
+    },
+    embedQuery: async (text: string) => {
+      const result = await getEmbeddings([text]);
+      return result[0];
+    }
+  };
+}
+
 export class VectorStoreService {
   private static stores = new Map<string, MemoryVectorStore>();
 
@@ -19,7 +32,7 @@ export class VectorStoreService {
     const key = `${userId}:${databaseId}`;
     
     if (!this.stores.has(key)) {
-      this.stores.set(key, new MemoryVectorStore(getEmbeddings()));
+      this.stores.set(key, new MemoryVectorStore(huggingFaceEmbeddingWrapper()));
     }
     
     return this.stores.get(key)!;
@@ -48,7 +61,11 @@ export class VectorStoreService {
       
       console.log(`Added ${documents.length} documents to vector store for user ${userId}`);
     } catch (error) {
-      console.error('Error adding documents to vector store:', error);
+      if (error instanceof Error) {
+        console.error('Error adding documents to vector store:', error.message);
+      } else {
+        console.error('Error adding documents to vector store:', error);
+      }
       
       // Handle OpenAI quota errors gracefully
       if (error instanceof Error && (
@@ -79,7 +96,11 @@ export class VectorStoreService {
       
       return results;
     } catch (error) {
-      console.error('Error searching vector store:', error);
+      if (error instanceof Error) {
+        console.error('Error searching vector store:', error.message);
+      } else {
+        console.error('Error searching vector store:', error);
+      }
       
       // Handle OpenAI quota errors gracefully
       if (error instanceof Error && (
@@ -111,7 +132,7 @@ export class VectorStoreService {
     databaseId: string,
     queryResults: any[],
     question: string,
-    sqlQuery: string
+    query: string
   ): Promise<Document[]> {
     try {
       const documents: VectorStoreDocument[] = [];
@@ -126,7 +147,7 @@ export class VectorStoreService {
             type: 'query_result',
             rowIndex: index,
             question,
-            sqlQuery,
+            query,
             timestamp: new Date().toISOString()
           }
         });
@@ -140,7 +161,7 @@ export class VectorStoreService {
         metadata: {
           type: 'summary',
           question,
-          sqlQuery,
+          query,
           totalRecords: queryResults.length,
           timestamp: new Date().toISOString()
         }
@@ -244,7 +265,11 @@ Data Summary: Analysis of ${totalRecords} records with ${numericColumns.length} 
 
       return results.map(doc => doc.pageContent).join('\n\n');
     } catch (error) {
-      console.error('Error getting relevant context:', error);
+      if (error instanceof Error) {
+        console.error('Error getting relevant context:', error.message);
+      } else {
+        console.error('Error getting relevant context:', error);
+      }
       return 'Error retrieving context.';
     }
   }

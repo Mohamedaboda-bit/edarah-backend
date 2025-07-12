@@ -23,4 +23,9 @@ router.delete('/databases/:databaseId/vector-store', RAGController.clearVectorSt
 // Rate limiting endpoint
 router.get('/rate-limit', RAGController.getRateLimitInfo);
 
+// Memory endpoints
+router.get('/memory', RAGController.getUserMemory);
+router.get('/memory/history', RAGController.getConversationHistory);
+router.delete('/memory/clear', RAGController.clearUserMemory);
+
 export default router; 

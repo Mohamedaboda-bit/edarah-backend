@@ -24,6 +24,7 @@ export interface ColumnInfo {
   isNullable: boolean;
   isPrimaryKey: boolean;
   defaultValue?: string;
+  enumValues?: string[];
 }
 
 export interface ConnectionResult {
@@ -72,6 +73,7 @@ export class DatabaseConnectionService {
           return mysqlMatch ? mysqlMatch[2] : 'unknown';
         
         case 'mongodb':
+          // Handle both formats: mongodb://user:pass@host:port/db and mongodb://host:port/db
           const mongoMatch = connectionString.match(/\/\/([^\/]+)\/([^?]+)/);
           return mongoMatch ? mongoMatch[2] : 'unknown';
         
@@ -245,9 +247,8 @@ export class DatabaseConnectionService {
         return mysqlResult;
       
       case 'mongodb':
-        // For MongoDB, we'll need to parse the query differently
-        // This is a simplified version - you might want to implement MongoDB query parsing
-        throw new Error('MongoDB query execution not yet implemented');
+        // Parse and execute MongoDB aggregation pipeline
+        return await this.executeMongoDBQuery(connection, query);
       
       case 'sqlserver':
         const sqlResult = await connection.request().query(query);
@@ -271,7 +272,8 @@ export class DatabaseConnectionService {
         c.data_type,
         c.is_nullable,
         CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key,
-        c.column_default
+        c.column_default,
+        c.udt_name
       FROM information_schema.tables t
       JOIN information_schema.columns c ON t.table_name = c.table_name
       LEFT JOIN (
@@ -285,7 +287,45 @@ export class DatabaseConnectionService {
     `;
     
     const result = await connection.query(query);
-    return this.groupColumnsByTable(result.rows);
+    const tableInfos = this.groupColumnsByTable(result.rows);
+    
+    // Enhance enum columns with their values
+    for (const table of tableInfos) {
+      for (const column of table.columns) {
+        if (column.type === 'USER-DEFINED') {
+          // Get enum values for this column
+          const enumValues = await this.getPostgreSQLEnumValues(connection, column.name);
+          column.enumValues = enumValues;
+        }
+      }
+    }
+    
+    return tableInfos;
+  }
+
+  /**
+   * Get enum values for a PostgreSQL enum type
+   */
+  private static async getPostgreSQLEnumValues(connection: Client, columnName: string): Promise<string[]> {
+    try {
+      // Query to get enum values for a specific column
+      const query = `
+        SELECT 
+          e.enumlabel as enum_value
+        FROM pg_enum e
+        JOIN pg_type t ON e.enumtypid = t.oid
+        JOIN pg_attribute a ON a.atttypid = t.oid
+        JOIN pg_class c ON a.attrelid = c.oid
+        WHERE a.attname = $1
+        ORDER BY e.enumsortorder
+      `;
+      
+      const result = await connection.query(query, [columnName]);
+      return result.rows.map(row => row.enum_value);
+    } catch (error) {
+      console.error(`Failed to get enum values for column ${columnName}:`, error);
+      return [];
+    }
   }
 
   private static async getMySQLTables(connection: mysql.Connection): Promise<TableInfo[]> {
@@ -351,6 +391,79 @@ export class DatabaseConnectionService {
         { name: 'document', type: 'JSON', isNullable: true, isPrimaryKey: false }
       ]
     }));
+  }
+
+  /**
+   * Execute MongoDB aggregation pipeline
+   */
+  private static async executeMongoDBQuery(connection: MongoClient, query: string): Promise<any[]> {
+    try {
+      console.log('Processing MongoDB query:', query);
+      
+      // Parse the query to extract collection name and pipeline
+      const queryMatch = query.match(/db\.(\w+)\.aggregate\(\[(.*?)\]\)/s);
+      if (!queryMatch) {
+        throw new Error('Invalid MongoDB aggregation query format. Expected: db.collectionName.aggregate([...])');
+      }
+
+      const collectionName = queryMatch[1];
+      const pipelineStr = queryMatch[2];
+      
+      console.log('Collection name:', collectionName);
+      console.log('Pipeline string:', pipelineStr);
+
+      // Parse the aggregation pipeline with more robust handling
+      let pipeline;
+      try {
+        // Clean up the pipeline string
+        let normalizedPipeline = pipelineStr
+          .trim()
+          .replace(/'/g, '"') // Replace single quotes with double quotes
+          .replace(/(\w+):/g, '"$1":') // Add quotes to property names
+          .replace(/,\s*}/g, '}') // Remove trailing commas in objects
+          .replace(/,\s*]/g, ']') // Remove trailing commas in arrays
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .replace(/"\s*:/g, '":') // Remove spaces before colons
+          .replace(/:\s*"/g, ':"') // Remove spaces after colons
+          .replace(/,\s*}/g, '}') // Remove trailing commas again
+          .replace(/,\s*]/g, ']'); // Remove trailing commas again
+
+        // Handle special MongoDB operators that might not be properly quoted
+        normalizedPipeline = normalizedPipeline
+          .replace(/"\$(\w+)"/g, '"$$$1"') // Ensure $ operators are properly quoted
+          .replace(/"(\w+)":/g, '"$1":'); // Ensure all property names are quoted
+
+        console.log('Normalized pipeline:', normalizedPipeline);
+        
+        pipeline = JSON.parse(`[${normalizedPipeline}]`);
+        console.log('Parsed pipeline:', JSON.stringify(pipeline, null, 2));
+      } catch (parseError) {
+        console.error('Pipeline parsing error:', parseError);
+        console.error('Original pipeline string:', pipelineStr);
+        
+        // Try a more lenient approach - use eval (only for trusted input)
+        try {
+          // This is a fallback for complex MongoDB syntax that JSON.parse can't handle
+          const pipelineCode = `[${pipelineStr}]`;
+          pipeline = eval(pipelineCode);
+          console.log('Fallback parsing successful');
+        } catch (evalError) {
+          throw new Error(`Failed to parse MongoDB aggregation pipeline: ${parseError instanceof Error ? parseError.message : 'Unknown error'}. Pipeline: ${pipelineStr}`);
+        }
+      }
+
+      const db = connection.db();
+      const collection = db.collection(collectionName);
+      
+      console.log('Executing aggregation on collection:', collectionName);
+      const result = await collection.aggregate(pipeline).toArray();
+      console.log('Aggregation result count:', result.length);
+      
+      return result;
+    } catch (error) {
+      console.error('MongoDB query execution error:', error);
+      throw new Error(`MongoDB query execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   private static async getSQLServerTables(connection: sql.ConnectionPool): Promise<TableInfo[]> {

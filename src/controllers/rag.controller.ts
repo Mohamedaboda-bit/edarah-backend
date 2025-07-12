@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { RAGService, RAGRequest } from '../utils/ragService';
+import { RAGService, RAGRequest, getUserMemory as getUserMemoryHelper, userMemories as userMemoryMap, loadConversationHistory, saveConversation } from '../utils/ragService';
 import { DatabaseConnectionService } from '../utils/databaseConnection';
 import { VectorStoreService } from '../utils/vectorStore';
 import { EncryptionService } from '../utils/encryption';
@@ -27,7 +27,7 @@ export class RAGController {
         });
       }
 
-      const { question, databaseId, context } = req.body;
+      const { question, databaseId, context, useGeneralKnowledge } = req.body;
 
       // Validate required fields
       if (!question) {
@@ -39,7 +39,8 @@ export class RAGController {
         question,
         userId,
         databaseId,
-        context
+        context,
+        useGeneralKnowledge: !!useGeneralKnowledge // default to false if not sent
       };
 
       const result = await RAGService.processRequest(ragRequest);
@@ -432,6 +433,73 @@ export class RAGController {
         error: 'Failed to clear vector store',
         message: error instanceof Error ? error.message : 'Unknown error'
       });
+    }
+  }
+
+  /**
+   * Get current user's conversation memory
+   */
+  static async getUserMemory(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+      
+      const memory = getUserMemoryHelper(userId);
+      const chatHistory = await loadConversationHistory(userId);
+      
+      return res.status(200).json({ 
+        success: true, 
+        data: {
+          memoryExists: !!memory,
+          hasConversationHistory: !!chatHistory,
+          conversationCount: chatHistory ? chatHistory.split('\n').filter(line => line.startsWith('User:')).length : 0
+        } 
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: 'Failed to get memory' });
+    }
+  }
+
+  /**
+   * Clear current user's conversation memory
+   */
+  static async clearUserMemory(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+      userMemoryMap.delete(userId);
+      return res.status(200).json({ success: true, message: 'Memory cleared' });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: 'Failed to clear memory' });
+    }
+  }
+
+  /**
+   * Get current user's conversation history
+   */
+  static async getConversationHistory(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+      
+      const chatHistory = await loadConversationHistory(userId);
+      
+      return res.status(200).json({ 
+        success: true, 
+        data: { 
+          chatHistory: chatHistory || 'No conversation history available',
+          hasHistory: !!chatHistory
+        } 
+      });
+    } catch (error) {
+      console.error('Error getting conversation history:', error);
+      return res.status(500).json({ success: false, error: 'Failed to get conversation history' });
     }
   }
 } 

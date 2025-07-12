@@ -6,6 +6,7 @@ import authRoutes from './routes/auth';
 import plansRoutes from './routes/plans';
 import paymobWebhookRoutes from './routes/paymobWebook';
 import ragRoutes from './routes/rag';
+import dashboardRoutes from './routes/dashboard';
 
 // Initialize LangChain configuration
 import './configs/langchain';
@@ -33,6 +34,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/plan', plansRoutes);
 app.use('/api/paymob', paymobWebhookRoutes);
 app.use('/api/rag', ragRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 
 // Health check endpoint
