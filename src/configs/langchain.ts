@@ -26,27 +26,36 @@ Database Schema:
 
 User Question: {question}
 
+{chatHistory}
+
 Requirements:
 - Use only the tables and columns provided in the schema
 - Return a valid SQL query that answers the question
 - If the question is about analysis, include aggregations and grouping
 - For business insights, focus on sales, products, customers, and reviews
+- Consider the conversation history to understand context and previous questions
 - Return ONLY the SQL query, no explanations
 - Use appropriate SQL syntax for {databaseType}
+- ONLY generate SELECT queries for data retrieval, NEVER INSERT, UPDATE, or DELETE operations
 
 SQL Query:`;
 
-function formatSQLPrompt(params: { schema: string; question: string; databaseType: string }) {
+function formatSQLPrompt(params: { schema: string; question: string; databaseType: string; chatHistory?: string }) {
+  const chatHistoryText = params.chatHistory ? `\nConversation History:\n${params.chatHistory}\n` : '';
+  
   return SQL_GENERATION_TEMPLATE
     .replace('{schema}', params.schema)
     .replace('{question}', params.question)
-    .replace('{databaseType}', params.databaseType);
+    .replace('{databaseType}', params.databaseType)
+    .replace('{chatHistory}', chatHistoryText);
 }
 
 const BUSINESS_ANALYSIS_TEMPLATE = `
 You are a business analyst and marketing expert. Analyze the provided data and answer the user's question with actionable insights.
 
 User Question: {question}
+
+{chatHistory}
 
 Data Analysis:
 {data}
@@ -59,7 +68,15 @@ Please provide:
 3. Summary of key metrics
 4. Confidence level in your analysis (1-10)
 
-Format your response as JSON with the following structure:
+IMPORTANT: 
+- Focus on business insights and actionable recommendations
+- Consider the conversation history to provide contextual and relevant insights
+- Build upon previous analysis and recommendations when appropriate
+- Do not mention database details, technical implementation, or query specifics
+- Provide insights that would be valuable for business decision making
+- Keep recommendations practical and implementable
+
+Format your response as clean JSON (no markdown code blocks) with the following structure:
 {{
   "insights": "Detailed analysis of the data...",
   "recommendations": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
@@ -70,11 +87,14 @@ Format your response as JSON with the following structure:
   "confidence": number
 }}`;
 
-function formatBusinessAnalysisPrompt(params: { question: string; data: string; context: string }) {
+function formatBusinessAnalysisPrompt(params: { question: string; data: string; context: string; chatHistory?: string }) {
+  const chatHistoryText = params.chatHistory ? `\nConversation History:\n${params.chatHistory}\n` : '';
+  
   return BUSINESS_ANALYSIS_TEMPLATE
     .replace('{question}', params.question)
     .replace('{data}', params.data)
-    .replace('{context}', params.context);
+    .replace('{context}', params.context)
+    .replace('{chatHistory}', chatHistoryText);
 }
 
 const SCHEMA_ANALYSIS_TEMPLATE = `
@@ -178,12 +198,12 @@ export const deepSeekCodingLLM = new DeepSeekLLM(DEEPSEEK_CODING_MODEL);
 export const deepSeekChatLLM = new DeepSeekLLM(DEEPSEEK_CHAT_MODEL);
 
 // Exported LLM/embedding functions
-export const executeSQLGeneration = async (params: { schema: string; question: string; databaseType: string }) => {
+export const executeSQLGeneration = async (params: { schema: string; question: string; databaseType: string; chatHistory?: string }) => {
   const prompt = formatSQLPrompt(params);
   return await callDeepSeek(DEEPSEEK_CODING_MODEL, prompt);
 };
 
-export const executeBusinessAnalysis = async (params: { question: string; data: string; context: string }) => {
+export const executeBusinessAnalysis = async (params: { question: string; data: string; context: string; chatHistory?: string }) => {
   const prompt = formatBusinessAnalysisPrompt(params);
   return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
 };

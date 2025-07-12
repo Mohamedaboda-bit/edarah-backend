@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { RAGService, RAGRequest, getUserMemory as getUserMemoryHelper, userMemories as userMemoryMap } from '../utils/ragService';
+import { RAGService, RAGRequest, getUserMemory as getUserMemoryHelper, userMemories as userMemoryMap, loadConversationHistory, saveConversation } from '../utils/ragService';
 import { DatabaseConnectionService } from '../utils/databaseConnection';
 import { VectorStoreService } from '../utils/vectorStore';
 import { EncryptionService } from '../utils/encryption';
@@ -444,8 +444,18 @@ export class RAGController {
       if (!userId) {
         return res.status(401).json({ success: false, error: 'User not authenticated' });
       }
+      
       const memory = getUserMemoryHelper(userId);
-      return res.status(200).json({ success: true, memory });
+      const chatHistory = await loadConversationHistory(userId);
+      
+      return res.status(200).json({ 
+        success: true, 
+        data: {
+          memoryExists: !!memory,
+          hasConversationHistory: !!chatHistory,
+          conversationCount: chatHistory ? chatHistory.split('\n').filter(line => line.startsWith('User:')).length : 0
+        } 
+      });
     } catch (error) {
       return res.status(500).json({ success: false, error: 'Failed to get memory' });
     }
@@ -464,6 +474,31 @@ export class RAGController {
       return res.status(200).json({ success: true, message: 'Memory cleared' });
     } catch (error) {
       return res.status(500).json({ success: false, error: 'Failed to clear memory' });
+    }
+  }
+
+  /**
+   * Get current user's conversation history
+   */
+  static async getConversationHistory(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+      
+      const chatHistory = await loadConversationHistory(userId);
+      
+      return res.status(200).json({ 
+        success: true, 
+        data: { 
+          chatHistory: chatHistory || 'No conversation history available',
+          hasHistory: !!chatHistory
+        } 
+      });
+    } catch (error) {
+      console.error('Error getting conversation history:', error);
+      return res.status(500).json({ success: false, error: 'Failed to get conversation history' });
     }
   }
 } 
