@@ -50,6 +50,92 @@ function formatSQLPrompt(params: { schema: string; question: string; databaseTyp
     .replace('{chatHistory}', chatHistoryText);
 }
 
+// Question Classification prompt
+const QUESTION_CLASSIFICATION_TEMPLATE = `
+You are a question classifier. Your job is to decide if the user's question REQUIRES querying a database (for business/data analysis) or can be answered from conversation history or general knowledge (like greetings, date, time, or previous chat info).
+
+User Question: {question}
+
+Conversation History: {chatHistory}
+
+Classify the question into one of these categories:
+
+DATABASE_NEEDED (answer: "yes"): Questions that require querying a database for data analysis, business insights, or specific data retrieval.
+Examples:
+- "Show me sales data"
+- "Analyze customer behavior"
+- "What are the top products?"
+- "Compare Q1 vs Q2 performance"
+- "How many customers do we have?"
+- "What's our revenue trend?"
+- "Find products with low inventory"
+- "What is the average order value this month?"
+- "Give me a report on last week's transactions"
+
+GENERAL_KNOWLEDGE (answer: "no"): Questions that can be answered from conversation history or general knowledge, including:
+- Greetings ("hi", "hello", "how are you?")
+- Date/time ("what is today?", "what's the date?", "what time is it?")
+- User info ("what is my name?", "what did I say before?", "can you repeat the last answer?")
+- General facts ("who are you?", "tell me about yourself")
+Examples:
+- "What is my name?" (from chat history)
+- "What's today's date?" (general knowledge)
+- "What day is it?" (general knowledge)
+- "What time is it?" (general knowledge)
+- "Hi, how are you?" (greeting)
+- "Hello" (greeting)
+- "What did you tell me before?" (from chat history)
+- "Can you repeat the analysis?" (from chat history)
+- "What was the previous result?" (from chat history)
+- "Tell me about yourself" (general knowledge)
+
+IMPORTANT:
+- If the question is about the current date, time, greetings, or general info, answer "no" (do NOT use the database).
+- If you are NOT SURE, answer "maybe" (and default to database for safety).
+- Be strict: Only answer "yes", "no", or "maybe" for needsDatabase.
+
+Return ONLY a JSON response in this format:
+{
+  "needsDatabase": "yes" | "no" | "maybe",
+  "reason": "brief explanation",
+  "confidence": 1-10
+}
+`;
+
+function formatQuestionClassificationPrompt(params: { question: string; chatHistory?: string }) {
+  const chatHistoryText = params.chatHistory ? params.chatHistory : 'No conversation history available';
+  
+  return QUESTION_CLASSIFICATION_TEMPLATE
+    .replace('{question}', params.question)
+    .replace('{chatHistory}', chatHistoryText);
+}
+
+// General Knowledge Response prompt
+const GENERAL_KNOWLEDGE_TEMPLATE = `
+You are a helpful assistant. Answer the user's question using conversation history or general knowledge.
+
+User Question: {question}
+
+Conversation History: {chatHistory}
+
+Instructions:
+- If the question asks about information shared in conversation history, use that information
+- If it's general knowledge (dates, facts, etc.), provide accurate information
+- If it references previous analysis, summarize what was discussed
+- Be conversational and helpful
+- Do not mention database queries or technical details
+- Provide clear, direct answers
+
+Answer the question based on the available information.`;
+
+function formatGeneralKnowledgePrompt(params: { question: string; chatHistory?: string }) {
+  const chatHistoryText = params.chatHistory ? params.chatHistory : 'No conversation history available';
+  
+  return GENERAL_KNOWLEDGE_TEMPLATE
+    .replace('{question}', params.question)
+    .replace('{chatHistory}', chatHistoryText);
+}
+
 const BUSINESS_ANALYSIS_TEMPLATE = `
 You are a business analyst and marketing expert. Analyze the provided data and answer the user's question with actionable insights.
 
@@ -126,6 +212,8 @@ export const PROMPT_TEMPLATES = {
   formatSQLPrompt,
   formatBusinessAnalysisPrompt,
   formatSchemaAnalysisPrompt,
+  formatQuestionClassificationPrompt,
+  formatGeneralKnowledgePrompt,
 };
 
 // DeepSeek LLM call helper
@@ -210,5 +298,15 @@ export const executeBusinessAnalysis = async (params: { question: string; data: 
 
 export const executeSchemaAnalysis = async (params: { schema: string }) => {
   const prompt = formatSchemaAnalysisPrompt(params);
+  return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
+};
+
+export const executeQuestionClassification = async (params: { question: string; chatHistory?: string }) => {
+  const prompt = formatQuestionClassificationPrompt(params);
+  return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
+};
+
+export const executeGeneralKnowledge = async (params: { question: string; chatHistory?: string }) => {
+  const prompt = formatGeneralKnowledgePrompt(params);
   return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
 };

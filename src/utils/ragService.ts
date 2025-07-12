@@ -8,7 +8,7 @@
 // 7. Prompt 2: Formats a prompt for business analysis (using question, query results, and context), sends it to DeepSeek (LLM) to generate insights
 // 8. Returns the SQL, insights, and recommendations to the user
 
-import { PROMPT_TEMPLATES, deepSeekCodingLLM, deepSeekChatLLM, executeSQLGeneration, executeBusinessAnalysis, executeSchemaAnalysis } from '../configs/langchain';
+import { PROMPT_TEMPLATES, deepSeekCodingLLM, deepSeekChatLLM, executeSQLGeneration, executeBusinessAnalysis, executeSchemaAnalysis, executeQuestionClassification, executeGeneralKnowledge } from '../configs/langchain';
 import { DatabaseConnectionService, DatabaseSchema } from './databaseConnection';
 import { VectorStoreService } from './vectorStore';
 import { prisma } from '../index';
@@ -20,6 +20,7 @@ export interface RAGRequest {
   userId: string;
   databaseId?: string;
   context?: string;
+  useGeneralKnowledge?: boolean;
 }
 
 export interface RAGResponse {
@@ -112,24 +113,134 @@ async function saveConversation(userId: string, question: string, response: stri
 
 export { getUserMemory, clearUserMemory, userMemories, loadConversationHistory, saveConversation };
 
+/**
+ * Question classification interface
+ */
+interface QuestionClassification {
+  needsDatabase: boolean;
+  reason: string;
+  confidence: number;
+}
+
+/**
+ * Classify whether a question needs database analysis or can be answered from general knowledge
+ */
+async function classifyQuestion(question: string, chatHistory: string): Promise<QuestionClassification> {
+  try {
+    console.log('Classifying question:', question);
+    
+    const result = await executeQuestionClassification({
+      question,
+      chatHistory
+    });
+    
+    console.log('Raw classification result:', result);
+    
+    // Parse the JSON response
+    let classification: { needsDatabase: string; reason: string; confidence: number };
+    try {
+      classification = JSON.parse(result);
+    } catch (parseError) {
+      console.error('Failed to parse classification JSON, defaulting to database:', parseError);
+      // Default to database for safety
+      return {
+        needsDatabase: true,
+        reason: 'Failed to parse classification, defaulting to database for safety',
+        confidence: 5
+      };
+    }
+    
+    console.log('Question classification (raw):', classification);
+    let needsDatabase: boolean;
+    if (typeof classification.needsDatabase === 'string') {
+      const val = classification.needsDatabase.trim().toLowerCase();
+      if (val === 'yes') needsDatabase = true;
+      else if (val === 'no') needsDatabase = false;
+      else if (val === 'maybe') needsDatabase = true; // default to database for safety
+      else needsDatabase = true; // fallback
+    } else if (typeof classification.needsDatabase === 'boolean') {
+      needsDatabase = classification.needsDatabase;
+    } else {
+      needsDatabase = true;
+    }
+    
+    if (typeof classification.confidence !== 'number' || classification.confidence < 1 || classification.confidence > 10) {
+      classification.confidence = 5;
+    }
+    
+    // If confidence is low, default to database for safety
+    if (classification.confidence < 6) {
+      console.log('Low confidence classification, defaulting to database for safety');
+      needsDatabase = true;
+      classification.reason = 'Low confidence classification, defaulting to database for safety';
+    }
+    
+    return {
+      needsDatabase,
+      reason: classification.reason,
+      confidence: classification.confidence
+    };
+  } catch (error) {
+    console.error('Error classifying question, defaulting to database:', error);
+    return {
+      needsDatabase: true,
+      reason: 'Classification failed, defaulting to database for safety',
+      confidence: 5
+    };
+  }
+}
+
 export class RAGService {
   /**
-   * Process RAG request with vector store integration
+   * Process general knowledge request (no database needed)
    */
-  static async processRequest(request: RAGRequest): Promise<RAGResponse> {
+  private static async processGeneralRequest(request: RAGRequest, chatHistory: string): Promise<RAGResponse> {
     try {
+      console.log('Processing general knowledge request for question:', request.question);
+      
+      const response = await executeGeneralKnowledge({
+        question: request.question,
+        chatHistory: chatHistory
+      });
+      
+      console.log('General knowledge response:', response);
+      
+      // Save conversation to memory
+      await saveConversation(request.userId, request.question, response);
+      console.log('General knowledge conversation saved successfully');
+      
+      // Return simplified response format
+      return {
+        insights: response,
+        recommendations: [],
+        dataSummary: {
+          totalRecords: 0,
+          keyMetrics: {}
+        },
+        confidence: 8,
+        databaseInfo: {
+          name: 'General Knowledge',
+          type: 'conversation_history'
+        }
+      };
+    } catch (error) {
+      console.error('Error processing general knowledge request:', error);
+      throw new Error('Failed to process general knowledge request');
+    }
+  }
+
+  /**
+   * Process database request (existing RAG flow)
+   */
+  private static async processDatabaseRequest(request: RAGRequest, chatHistory: string): Promise<RAGResponse> {
+    try {
+      console.log('Processing database request for question:', request.question);
+      
       // Step 1: Get user's database information
       const databaseInfo = await this.getUserDatabase(request.userId, request.databaseId);
       // Step 2: Get or refresh schema
       const schema = await this.getSchema(databaseInfo);
-      // Step 3: Load conversation history from user's memory
-      const chatHistory = await loadConversationHistory(request.userId);
-      console.log('Loaded conversation history:', chatHistory ? 'Available' : 'None');
-      if (chatHistory) {
-        console.log('Conversation history preview:', chatHistory.substring(0, 200) + '...');
-      }
-      
-      // Step 4: Generate SQL query using manual prompt formatting and LLM call
+      // Step 3: Generate SQL query using manual prompt formatting and LLM call
       const schemaDescription = this.formatSchemaForPrompt(schema);
       // Dynamically add DB-specific instructions
       let dbInstructions = '';
@@ -325,7 +436,43 @@ export class RAGService {
         }
       };
     } catch (error) {
-      console.error('RAG processing error:', error);
+      console.error('Error processing database request:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process RAG request with smart question classification
+   */
+  static async processRequest(request: RAGRequest): Promise<RAGResponse> {
+    try {
+      // Step 1: Load conversation history from user's memory
+      const chatHistory = await loadConversationHistory(request.userId);
+      console.log('Loaded conversation history:', chatHistory ? 'Available' : 'None');
+      if (chatHistory) {
+        console.log('Conversation history preview:', chatHistory.substring(0, 200) + '...');
+      }
+
+      // NEW: User override for general knowledge pipeline
+      if (request.useGeneralKnowledge === true) {
+        console.log('User override: Forcing general knowledge pipeline');
+        return await this.processGeneralRequest(request, chatHistory);
+      }
+      
+      // Step 2: Classify the question type
+      const classification = await classifyQuestion(request.question, chatHistory);
+      console.log('Question classification result:', classification);
+      
+      // Step 3: Route to appropriate processing path
+      if (classification.needsDatabase) {
+        console.log('Routing to database processing path');
+        return await this.processDatabaseRequest(request, chatHistory);
+      } else {
+        console.log('Routing to general knowledge processing path');
+        return await this.processGeneralRequest(request, chatHistory);
+      }
+    } catch (error) {
+      console.error('Error in processRequest:', error);
       throw error;
     }
   }

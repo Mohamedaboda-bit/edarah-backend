@@ -27,7 +27,7 @@ export class RAGController {
         });
       }
 
-      const { question, databaseId, context } = req.body;
+      const { question, databaseId, context, useGeneralKnowledge } = req.body;
 
       // Validate required fields
       if (!question) {
@@ -39,7 +39,8 @@ export class RAGController {
         question,
         userId,
         databaseId,
-        context
+        context,
+        useGeneralKnowledge: !!useGeneralKnowledge // default to false if not sent
       };
 
       const result = await RAGService.processRequest(ragRequest);
