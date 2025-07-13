@@ -46,6 +46,8 @@ Requirements:
 - Return ONLY the SQL query, no explanations
 - Use appropriate SQL syntax for {databaseType}
 - ONLY generate SELECT queries for data retrieval, NEVER INSERT, UPDATE, or DELETE operations
+- IMPORTANT: For MySQL with ONLY_FULL_GROUP_BY mode, ALL non-aggregated columns in SELECT must be included in GROUP BY clause
+- When using GROUP BY, only include columns that are functionally dependent on the GROUP BY columns or use aggregate functions (SUM, COUNT, AVG, etc.)
 
 SQL Query:`;
 
@@ -182,11 +184,187 @@ Format your response as clean JSON (no markdown code blocks) with the following 
   "confidence": number
 }}`;
 
+const DASHBOARD_ANALYSIS_TEMPLATE = `
+You are a dashboard analytics expert. Analyze the provided e-commerce data and return structured analytics for a business dashboard.
+
+Data Analysis:
+{data}
+
+Additional Context: {context}
+
+{chatHistory}
+
+IMPORTANT: 
+- Return ONLY structured JSON data, no explanations or markdown
+- Focus on business metrics and actionable insights
+- Calculate percentages and metrics accurately
+- Identify top performers and problem areas
+- Provide chart-ready data structures
+
+Return a JSON object with this EXACT structure:
+{{
+  "categories": [
+    {{
+      "name": "category_name",
+      "totalProducts": number,
+      "totalRevenue": number,
+      "totalProfit": number,
+      "percentage": number,
+      "avgRating": number,
+      "topProduct": {{
+        "name": "product_name",
+        "revenue": number,
+        "profit": number,
+        "sales": number
+      }}
+    }}
+  ],
+  "suppliers": [
+    {{
+      "name": "supplier_name",
+      "totalProducts": number,
+      "totalRevenue": number,
+      "totalProfit": number,
+      "percentage": number,
+      "avgRating": number,
+      "topProduct": {{
+        "name": "product_name",
+        "revenue": number,
+        "profit": number,
+        "sales": number
+      }}
+    }}
+  ],
+  "topProducts": {{
+    "lowSales": [
+      {{
+        "name": "product_name",
+        "sales": number,
+        "revenue": number,
+        "profit": number,
+        "stock": number,
+        "category": "category_name",
+        "supplier": "supplier_name"
+      }}
+    ],
+    "deadStock": [
+      {{
+        "name": "product_name",
+        "sales": number,
+        "stock": number,
+        "revenue": number,
+        "profit": number,
+        "category": "category_name",
+        "supplier": "supplier_name"
+      }}
+    ],
+    "expired": [
+      {{
+        "name": "product_name",
+        "lastRestocked": "date",
+        "stock": number,
+        "sales": number,
+        "category": "category_name",
+        "supplier": "supplier_name"
+      }}
+    ],
+    "loss": [
+      {{
+        "name": "product_name",
+        "profit": number,
+        "revenue": number,
+        "sales": number,
+        "category": "category_name",
+        "supplier": "supplier_name"
+      }}
+    ],
+    "bestPerformers": [
+      {{
+        "name": "product_name",
+        "revenue": number,
+        "profit": number,
+        "sales": number,
+        "rating": number,
+        "category": "category_name",
+        "supplier": "supplier_name"
+      }}
+    ],
+    "worstPerformers": [
+      {{
+        "name": "product_name",
+        "revenue": number,
+        "profit": number,
+        "sales": number,
+        "rating": number,
+        "category": "category_name",
+        "supplier": "supplier_name"
+      }}
+    ]
+  },
+  "chartData": {{
+    "categoryRevenue": [
+      {{
+        "category": "category_name",
+        "revenue": number,
+        "percentage": number
+      }}
+    ],
+    "categoryProfit": [
+      {{
+        "category": "category_name",
+        "profit": number,
+        "percentage": number
+      }}
+    ],
+    "supplierPerformance": [
+      {{
+        "supplier": "supplier_name",
+        "revenue": number,
+        "profit": number,
+        "productCount": number
+      }}
+    ],
+    "monthlyTrends": [
+      {{
+        "month": "YYYY-MM",
+        "revenue": number,
+        "profit": number,
+        "sales": number
+      }}
+    ]
+  }},
+  "overallPerformance": {{
+    "totalRevenue": number,
+    "totalProfit": number,
+    "avgProfit": number,
+    "avgProfitMargin": number,
+    "totalProducts": number,
+    "totalSales": number,
+    "avgRating": number,
+    "profitChange": number,
+    "revenueChange": number
+  }},
+  "suggestions": [
+    "Suggestion 1",
+    "Suggestion 2",
+    "Suggestion 3"
+  ]
+}}`;
+
 function formatBusinessAnalysisPrompt(params: { question: string; data: string; context: string; chatHistory?: string }) {
   const chatHistoryText = params.chatHistory ? `\nConversation History:\n${params.chatHistory}\n` : '';
   
   return BUSINESS_ANALYSIS_TEMPLATE
     .replace('{question}', params.question)
+    .replace('{data}', params.data)
+    .replace('{context}', params.context)
+    .replace('{chatHistory}', chatHistoryText);
+}
+
+function formatDashboardAnalysisPrompt(params: { data: string; context: string; chatHistory?: string }) {
+  const chatHistoryText = params.chatHistory ? `\nConversation History:\n${params.chatHistory}\n` : '';
+  
+  return DASHBOARD_ANALYSIS_TEMPLATE
     .replace('{data}', params.data)
     .replace('{context}', params.context)
     .replace('{chatHistory}', chatHistoryText);
@@ -302,6 +480,11 @@ export const executeSQLGeneration = async (params: { schema: string; question: s
 
 export const executeBusinessAnalysis = async (params: { question: string; data: string; context: string; chatHistory?: string }) => {
   const prompt = formatBusinessAnalysisPrompt(params);
+  return await callOpenAI(OPENAI_ANALYSIS_MODEL, prompt);
+};
+
+export const executeDashboardAnalysis = async (params: { data: string; context: string; chatHistory?: string }) => {
+  const prompt = formatDashboardAnalysisPrompt(params);
   return await callOpenAI(OPENAI_ANALYSIS_MODEL, prompt);
 };
 

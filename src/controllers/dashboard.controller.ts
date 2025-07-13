@@ -11,9 +11,17 @@ export const dashboardAnalysis = async (req: Request, res: Response) => {
     // Optionally support databaseId override
     const databaseId = req.query.databaseId || req.body.databaseId;
     const result = await getDashboardAnalysis({ userId, databaseId });
+    
     if (result.insufficientData) {
-      return res.status(200).json({ message: 'Data from the database is not enough to analyze. You can go to the chatbot to ask about specifics.', rawData: result.rawData });
+      return res.status(200).json({ 
+        message: 'Data from the database is not enough to analyze. You can go to the chatbot to ask about specifics.',
+        reason: result.reason,
+        dataSummary: result.dataSummary,
+        sqlQuery: result.sqlQuery,
+        rawData: result.rawData || []
+      });
     }
+    
     return res.status(200).json(result);
   } catch (error) {
     console.error('Dashboard analysis error:', error);
