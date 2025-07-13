@@ -28,4 +28,11 @@ router.get('/memory', RAGController.getUserMemory);
 router.get('/memory/history', RAGController.getConversationHistory);
 router.delete('/memory/clear', RAGController.clearUserMemory);
 
+// Cache management endpoints
+router.get('/cache/stats', RAGController.getCacheStats);
+router.delete('/cache/user', RAGController.clearUserCache);
+router.delete('/cache/database/:databaseId', RAGController.clearDatabaseCache);
+router.delete('/cache/all', RAGController.clearAllCache);
+router.post('/cache/cleanup', RAGController.cleanupExpiredCache);
+
 export default router; 

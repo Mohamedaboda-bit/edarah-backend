@@ -1,21 +1,30 @@
 import axios from 'axios';
-import { HuggingFaceInferenceEmbeddings } from '@langchain/community/embeddings/hf';
+import { OpenAIEmbeddings } from '@langchain/openai';
+// Remove import { HuggingFaceInferenceEmbeddings } from '@langchain/community/embeddings/hf';
 // Remove import { PromptTemplate } from 'langchain/dist/prompts/prompt';
 // Remove import { BaseLLM } from 'langchain/llms/base';
 
-// DeepSeek API endpoints and model names
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
-const DEEPSEEK_CODING_MODEL = process.env.DEEPSEEK_CODING_MODEL || 'deepseek-coding';
-const DEEPSEEK_CHAT_MODEL = process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat';
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+// OpenAI API endpoints and model names
+const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENAI_QUERY_MODEL = process.env.OPENAI_QUERY_MODEL || 'gpt-4o';
+const OPENAI_ANALYSIS_MODEL = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-mini';
+const OPENAI_EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// HuggingFace Inference API
-const HF_API_URL = 'https://api-inference.huggingface.co/models';
-const HF_EMBEDDING_MODEL = process.env.HF_EMBEDDING_MODEL || 'sentence-transformers/all-MiniLM-L6-v2';
-const HF_API_KEY = process.env.HF_API_KEY;
+// Remove DeepSeek API endpoints and model names
+// const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+// const DEEPSEEK_CODING_MODEL = process.env.DEEPSEEK_CODING_MODEL || 'deepseek-coding';
+// const DEEPSEEK_CHAT_MODEL = process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat';
+// const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
-if (!DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY environment variable is required');
-if (!HF_API_KEY) throw new Error('HF_API_KEY environment variable is required');
+// Remove HuggingFace Inference API
+// const HF_API_URL = 'https://api-inference.huggingface.co/models';
+// const HF_EMBEDDING_MODEL = process.env.HF_EMBEDDING_MODEL || 'sentence-transformers/all-MiniLM-L6-v2';
+// const HF_API_KEY = process.env.HF_API_KEY;
+
+if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY environment variable is required');
+// Remove if (!DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY environment variable is required');
+// Remove if (!HF_API_KEY) throw new Error('HF_API_KEY environment variable is required');
 
 // SQL Generation prompt as a plain string
 const SQL_GENERATION_TEMPLATE = `
@@ -216,11 +225,11 @@ export const PROMPT_TEMPLATES = {
   formatGeneralKnowledgePrompt,
 };
 
-// DeepSeek LLM call helper
-async function callDeepSeek(model: string, prompt: string): Promise<string> {
+// OpenAI LLM call helper
+async function callOpenAI(model: string, prompt: string): Promise<string> {
   try {
     const response = await axios.post(
-      DEEPSEEK_API_URL,
+      OPENAI_API_URL,
       {
         model,
         messages: [
@@ -229,7 +238,7 @@ async function callDeepSeek(model: string, prompt: string): Promise<string> {
       },
       {
         headers: {
-          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json'
         }
       }
@@ -239,17 +248,17 @@ async function callDeepSeek(model: string, prompt: string): Promise<string> {
     if (error.response && error.response.data && error.response.data.error) {
       const errMsg = error.response.data.error.message || 'Unknown error';
       const errCode = error.response.data.error.code || 'No code';
-      console.error(`DeepSeek API error: [${errCode}] ${errMsg}`);
+      console.error(`OpenAI API error: [${errCode}] ${errMsg}`);
     } else {
-        console.error('DeepSeek API error:', error.message);
+        console.error('OpenAI API error:', error.message);
     }
     throw error;
   }
 }
 
-const embeddings = new HuggingFaceInferenceEmbeddings({
-  model: HF_EMBEDDING_MODEL,
-  apiKey: HF_API_KEY,
+const embeddings = new OpenAIEmbeddings({
+  modelName: OPENAI_EMBEDDING_MODEL,
+  openAIApiKey: OPENAI_API_KEY,
 });
 
 export const getEmbeddings = async (texts: string[]): Promise<number[][]> => {
@@ -264,13 +273,13 @@ interface MinimalLLM {
 }
 
 // Your custom LLM
-class DeepSeekLLM implements MinimalLLM {
+class OpenAILLM implements MinimalLLM {
   model: string;
   constructor(model: string) {
     this.model = model;
   }
   async call(inputs: { prompt: string }): Promise<{ text: string }> {
-    const text = await callDeepSeek(this.model, inputs.prompt);
+    const text = await callOpenAI(this.model, inputs.prompt);
     return { text };
   }
   async predict(prompt: string): Promise<string> {
@@ -278,35 +287,35 @@ class DeepSeekLLM implements MinimalLLM {
   }
   async predictMessages(messages: any[]): Promise<any> {
     // Not implemented for non-chat models
-    throw new Error('predictMessages is not implemented for DeepSeekLLM');
+    throw new Error('predictMessages is not implemented for OpenAILLM');
   }
 }
 
-export const deepSeekCodingLLM = new DeepSeekLLM(DEEPSEEK_CODING_MODEL);
-export const deepSeekChatLLM = new DeepSeekLLM(DEEPSEEK_CHAT_MODEL);
+export const openAIQueryLLM = new OpenAILLM(OPENAI_QUERY_MODEL);
+export const openAIAnalysisLLM = new OpenAILLM(OPENAI_ANALYSIS_MODEL);
 
 // Exported LLM/embedding functions
 export const executeSQLGeneration = async (params: { schema: string; question: string; databaseType: string; chatHistory?: string }) => {
   const prompt = formatSQLPrompt(params);
-  return await callDeepSeek(DEEPSEEK_CODING_MODEL, prompt);
+  return await callOpenAI(OPENAI_QUERY_MODEL, prompt);
 };
 
 export const executeBusinessAnalysis = async (params: { question: string; data: string; context: string; chatHistory?: string }) => {
   const prompt = formatBusinessAnalysisPrompt(params);
-  return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
+  return await callOpenAI(OPENAI_ANALYSIS_MODEL, prompt);
 };
 
 export const executeSchemaAnalysis = async (params: { schema: string }) => {
   const prompt = formatSchemaAnalysisPrompt(params);
-  return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
+  return await callOpenAI(OPENAI_ANALYSIS_MODEL, prompt);
 };
 
 export const executeQuestionClassification = async (params: { question: string; chatHistory?: string }) => {
   const prompt = formatQuestionClassificationPrompt(params);
-  return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
+  return await callOpenAI(OPENAI_ANALYSIS_MODEL, prompt);
 };
 
 export const executeGeneralKnowledge = async (params: { question: string; chatHistory?: string }) => {
   const prompt = formatGeneralKnowledgePrompt(params);
-  return await callDeepSeek(DEEPSEEK_CHAT_MODEL, prompt);
+  return await callOpenAI(OPENAI_ANALYSIS_MODEL, prompt);
 };

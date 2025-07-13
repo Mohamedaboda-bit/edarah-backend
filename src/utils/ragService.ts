@@ -1,16 +1,17 @@
 // RAG Flow:
 // 1. User sends a question to /api/rag/analyze
 // 2. Backend retrieves the database schema for the user
-// 3. Prompt 1: Formats a prompt for SQL generation (using schema and question), sends it to DeepSeek (LLM) to generate a SQL query
+// 3. Prompt 1: Formats a prompt for SQL generation (using schema and question), sends it to OpenAI GPT-4o to generate a SQL query
 // 4. Strips code block markers and explanation from the LLM output, executes the SQL query on the user's database
-// 5. Embeds the results and stores them in a vector store (using HuggingFace embeddings)
+// 5. Embeds the results and stores them in a vector store (using OpenAI text-embedding-3-small)
 // 6. Retrieves relevant context from the vector store for the question
-// 7. Prompt 2: Formats a prompt for business analysis (using question, query results, and context), sends it to DeepSeek (LLM) to generate insights
+// 7. Prompt 2: Formats a prompt for business analysis (using question, query results, and context), sends it to OpenAI GPT-4.1-mini to generate insights
 // 8. Returns the SQL, insights, and recommendations to the user
 
-import { PROMPT_TEMPLATES, deepSeekCodingLLM, deepSeekChatLLM, executeSQLGeneration, executeBusinessAnalysis, executeSchemaAnalysis, executeQuestionClassification, executeGeneralKnowledge } from '../configs/langchain';
+import { PROMPT_TEMPLATES, openAIQueryLLM, openAIAnalysisLLM, executeSQLGeneration, executeBusinessAnalysis, executeSchemaAnalysis, executeQuestionClassification, executeGeneralKnowledge } from '../configs/langchain';
 import { DatabaseConnectionService, DatabaseSchema } from './databaseConnection';
 import { VectorStoreService } from './vectorStore';
+import { CacheService } from './cacheService';
 import { prisma } from '../index';
 // Update LangChain imports to latest API
 import { BufferMemory } from 'langchain/memory';
@@ -239,15 +240,47 @@ export class RAGService {
       const databaseInfo = await this.getUserDatabase(request.userId, request.databaseId);
       // Step 2: Get or refresh schema
       const schema = await this.getSchema(databaseInfo);
-      // Step 3: Generate SQL query using manual prompt formatting and LLM call
-      const schemaDescription = this.formatSchemaForPrompt(schema);
-      // Dynamically add DB-specific instructions
-      let dbInstructions = '';
-      if (schema.databaseType === 'mysql') {
-        dbInstructions = `\n- Use only MySQL 8.0 compatible syntax.\n- Do not use multiple CTEs (WITH ... AS ...), use subqueries if needed.\n- Do not include explanations or comments, only the SQL statement.\n- ONLY generate SELECT queries, NEVER INSERT, UPDATE, or DELETE operations.`;
-      } else if (schema.databaseType === 'mongodb') {
-        dbInstructions = `\n- Return a MongoDB aggregation pipeline in the format: db.collectionName.aggregate([...])\n- Do not include explanations or comments, only the pipeline.\n- Use proper MongoDB aggregation operators like $match, $group, $project, etc.\n- Keep the pipeline simple and avoid complex nested structures.\n- Use double quotes for all strings and property names.\n- ONLY generate READ queries (aggregation pipelines), NEVER INSERT, UPDATE, or DELETE operations.\n- Example format: db.products.aggregate([{"$group": {"_id": "$category", "count": {"$sum": 1}}}])`;
-      } else if (schema.databaseType === 'postgresql') {
+      
+      // Step 3: Check cache for complete query result
+      const schemaVersion = this.generateSchemaVersion(schema);
+      const cachedResult = CacheService.getCachedQueryResult(
+        request.userId,
+        databaseInfo.id,
+        request.question,
+        schemaVersion
+      );
+      
+      if (cachedResult) {
+        console.log('Returning cached query result');
+        return {
+          ...cachedResult.response,
+          query: cachedResult.sqlQuery
+        };
+      }
+      
+      // Step 4: Check cache for SQL query
+      const cachedSQL = CacheService.getCachedSQLQuery(
+        request.userId,
+        databaseInfo.id,
+        request.question,
+        schema
+      );
+      
+      let sqlQuery: string;
+      let queryResult: any[];
+      if (cachedSQL) {
+        console.log('Using cached SQL query');
+        sqlQuery = cachedSQL;
+      } else {
+        // Step 5: Generate SQL query using manual prompt formatting and LLM call
+        const schemaDescription = this.formatSchemaForPrompt(schema);
+        // Dynamically add DB-specific instructions
+        let dbInstructions = '';
+        if (schema.databaseType === 'mysql') {
+          dbInstructions = `\n- Use only MySQL 8.0 compatible syntax.\n- Do not use multiple CTEs (WITH ... AS ...), use subqueries if needed.\n- Do not include explanations or comments, only the SQL statement.\n- ONLY generate SELECT queries, NEVER INSERT, UPDATE, or DELETE operations.`;
+        } else if (schema.databaseType === 'mongodb') {
+          dbInstructions = `\n- Return a MongoDB aggregation pipeline in the format: db.collectionName.aggregate([...])\n- Do not include explanations or comments, only the pipeline.\n- Use proper MongoDB aggregation operators like $match, $group, $project, etc.\n- Keep the pipeline simple and avoid complex nested structures.\n- Use double quotes for all strings and property names.\n- ONLY generate READ queries (aggregation pipelines), NEVER INSERT, UPDATE, or DELETE operations.\n- Example format: db.products.aggregate([{"$group": {"_id": "$category", "count": {"$sum": 1}}}])`;
+        } else if (schema.databaseType === 'postgresql') {
         dbInstructions = `\n- Use PostgreSQL syntax.\n- Do not include explanations or comments, only the SQL statement.\n- ONLY generate SELECT queries, NEVER INSERT, UPDATE, or DELETE operations.\n- Quote table names with double quotes if they contain uppercase letters (e.g., "Project_freelancer").\n- Avoid using ENUM columns in WHERE clauses as they may cause compatibility issues.\n- Focus on numeric, text, and timestamp columns for filtering and analysis.\n- Keep queries simple and avoid complex JOINs that might return no results.\n- Start with basic queries on single tables, then add JOINs only if necessary.\n- For revenue analysis, focus on tables with financial data like freelancer_stats, payments, proposals.\n- Use LEFT JOINs instead of INNER JOINs to avoid losing data when relationships don't exist.`;
       }
       // ...add more for other databases as needed
@@ -257,8 +290,8 @@ export class RAGService {
         databaseType: schema.databaseType,
         chatHistory: chatHistory
       }) + dbInstructions;
-      console.log('Prompt to DeepSeek (SQL generation):\n', prompt);
-      let sqlResult = await deepSeekCodingLLM.call({ prompt });
+              console.log('Prompt to OpenAI GPT-4o (SQL generation):\n', prompt);
+      let sqlResult = await openAIQueryLLM.call({ prompt });
       console.log('Raw LLM response:', sqlResult.text);
       // Strip code block markers and explanation from LLM output
       let sqlQuery = sqlResult.text.trim();
@@ -309,8 +342,8 @@ export class RAGService {
         // If SQL execution fails, re-prompt LLM with error and ask for a fix
         const errorMsg = error instanceof Error ? error.message : String(error);
         const fixPrompt = `${prompt}\n\nThe previous query failed with the following error for ${schema.databaseType}:\n${errorMsg}\nPlease fix the query for this database and return only the corrected query.`;
-        console.log('Re-prompting DeepSeek (query fix):\n', fixPrompt);
-        sqlResult = await deepSeekCodingLLM.call({ prompt: fixPrompt });
+                  console.log('Re-prompting OpenAI GPT-4o (query fix):\n', fixPrompt);
+        sqlResult = await openAIQueryLLM.call({ prompt: fixPrompt });
         sqlQuery = sqlResult.text.trim().replace(/```sql|```javascript|```/gi, '').trim();
         
         // Handle different query types based on database
@@ -340,7 +373,16 @@ export class RAGService {
         
         queryResult = await this.executeQuery(databaseInfo, sqlQuery);
       }
+      }
       // Step 6: Process results and add to vector store
+      // Defensive: Ensure queryResult is always an array
+      if (!Array.isArray(queryResult)) {
+        if (queryResult === undefined || queryResult === null) {
+          queryResult = [];
+        } else {
+          queryResult = [queryResult];
+        }
+      }
       const documents = await VectorStoreService.processQueryResults(
         request.userId,
         databaseInfo.id,
@@ -372,7 +414,9 @@ export class RAGService {
         relevantContext = 'No historical context available due to quota limits.';
       }
       // Step 8: Generate insights using manual prompt formatting and LLM call
-      const dataContext = this.formatDataForPrompt(queryResult);
+      // Defensive: Ensure queryResult is always an array before formatting
+      let safeQueryResult = Array.isArray(queryResult) ? queryResult : (queryResult ? [queryResult] : []);
+      const dataContext = this.formatDataForPrompt(safeQueryResult);
       console.log('=== DATA FLOW DEBUG ===');
       console.log('Query result length:', queryResult.length);
       console.log('Query result type:', typeof queryResult);
@@ -389,8 +433,8 @@ export class RAGService {
         context: combinedContext || 'No additional context provided',
         chatHistory: chatHistory
       });
-      console.log('Prompt to DeepSeek (Business analysis):\n', businessPrompt);
-      const insightsResult = await deepSeekChatLLM.call({ prompt: businessPrompt });
+              console.log('Prompt to OpenAI GPT-4.1-mini (Business analysis):\n', businessPrompt);
+              const insightsResult = await openAIAnalysisLLM.call({ prompt: businessPrompt });
       console.log('Raw insights response:', insightsResult.text);
       
       let insights: any = {};
@@ -425,15 +469,39 @@ export class RAGService {
       await saveConversation(request.userId, request.question, responseText);
       console.log('Conversation saved successfully');
       
-      // Step 10: Return complete response
-      return {
+      // Step 9: Cache the SQL query if it was generated
+      if (!cachedSQL) {
+        CacheService.cacheSQLQuery(
+          request.userId,
+          databaseInfo.id,
+          request.question,
+          sqlQuery,
+          schema,
+          databaseInfo.type
+        );
+      }
+
+      // Step 10: Cache the complete query result
+      const finalResponse = {
         ...insights,
-        query: sqlQuery, // Renamed from sqlQuery to query for clarity
+        query: sqlQuery,
         databaseInfo: {
           name: databaseInfo.name,
           type: databaseInfo.type
         }
       };
+
+      CacheService.cacheQueryResult(
+        request.userId,
+        databaseInfo.id,
+        request.question,
+        finalResponse,
+        schemaVersion,
+        sqlQuery
+      );
+
+      // Step 11: Return complete response
+      return finalResponse;
     } catch (error) {
       console.error('Error processing database request:', error);
       throw error;
@@ -912,6 +980,14 @@ export class RAGService {
       .replace(/WHERE\s*$/gi, '');
     
     return fixedQuery;
+  }
+
+  /**
+   * Generate schema version for caching
+   */
+  private static generateSchemaVersion(schema: DatabaseSchema): string {
+    const schemaString = JSON.stringify(schema, Object.keys(schema).sort());
+    return require('crypto').createHash('sha256').update(schemaString).digest('hex').substring(0, 8);
   }
 
   /**

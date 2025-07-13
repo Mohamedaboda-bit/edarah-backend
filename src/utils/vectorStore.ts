@@ -1,6 +1,7 @@
 import { MemoryVectorStore } from 'langchain/vectorstores/memory';
 import { Document } from 'langchain/document';
 import { getEmbeddings } from '../configs/langchain';
+import { CacheService } from './cacheService';
 import { prisma } from '../index';
 
 export interface VectorStoreDocument {
@@ -9,15 +10,44 @@ export interface VectorStoreDocument {
   metadata: Record<string, any>;
 }
 
-// Helper to wrap async embedding for MemoryVectorStore
-function huggingFaceEmbeddingWrapper() {
+// Helper to wrap async embedding for MemoryVectorStore with caching
+function cachedEmbeddingWrapper() {
   return {
     embedDocuments: async (texts: string[]) => {
-      return await getEmbeddings(texts);
+      const embeddings: number[][] = [];
+      
+      for (const text of texts) {
+        // Check cache first
+        const cachedEmbedding = CacheService.getCachedEmbedding(text);
+        if (cachedEmbedding) {
+          embeddings.push(cachedEmbedding);
+        } else {
+          // Generate new embedding
+          const result = await getEmbeddings([text]);
+          const embedding = result[0];
+          
+          // Cache the embedding
+          CacheService.cacheEmbedding(text, embedding);
+          embeddings.push(embedding);
+        }
+      }
+      
+      return embeddings;
     },
     embedQuery: async (text: string) => {
+      // Check cache first
+      const cachedEmbedding = CacheService.getCachedEmbedding(text);
+      if (cachedEmbedding) {
+        return cachedEmbedding;
+      }
+      
+      // Generate new embedding
       const result = await getEmbeddings([text]);
-      return result[0];
+      const embedding = result[0];
+      
+      // Cache the embedding
+      CacheService.cacheEmbedding(text, embedding);
+      return embedding;
     }
   };
 }
@@ -32,7 +62,7 @@ export class VectorStoreService {
     const key = `${userId}:${databaseId}`;
     
     if (!this.stores.has(key)) {
-      this.stores.set(key, new MemoryVectorStore(huggingFaceEmbeddingWrapper()));
+      this.stores.set(key, new MemoryVectorStore(cachedEmbeddingWrapper()));
     }
     
     return this.stores.get(key)!;
@@ -73,7 +103,7 @@ export class VectorStoreService {
         error.message.includes('quota') || 
         error.message.includes('exceeded')
       )) {
-        console.log('OpenAI quota exceeded for vector store, skipping document addition...');
+        console.log('OpenAI text-embedding-3-small quota exceeded for vector store, skipping document addition...');
         return; // Skip vector store operations but don't fail the entire request
       }
       
@@ -108,7 +138,7 @@ export class VectorStoreService {
         error.message.includes('quota') || 
         error.message.includes('exceeded')
       )) {
-        console.log('OpenAI quota exceeded for vector store search, returning empty results...');
+        console.log('OpenAI text-embedding-3-small quota exceeded for vector store search, returning empty results...');
         return []; // Return empty results instead of failing
       }
       
@@ -136,6 +166,12 @@ export class VectorStoreService {
   ): Promise<Document[]> {
     try {
       const documents: VectorStoreDocument[] = [];
+
+      // Ensure queryResults is an array
+      if (!Array.isArray(queryResults)) {
+        console.warn('queryResults is not an array:', queryResults);
+        queryResults = [];
+      }
 
       // Create documents from query results
       queryResults.forEach((row, index) => {
@@ -184,14 +220,28 @@ export class VectorStoreService {
    * Format row data for embedding
    */
   private static formatRowForEmbedding(row: any): string {
-    const entries = Object.entries(row);
-    return entries.map(([key, value]) => `${key}: ${value}`).join(', ');
+    if (!row || typeof row !== 'object') {
+      return 'Invalid row data';
+    }
+    
+    try {
+      const entries = Object.entries(row);
+      return entries.map(([key, value]) => `${key}: ${value}`).join(', ');
+    } catch (error) {
+      console.error('Error formatting row for embedding:', error);
+      return 'Error formatting row data';
+    }
   }
 
   /**
    * Create summary content for embedding
    */
   private static createSummaryContent(results: any[], question: string): string {
+    // Ensure results is an array
+    if (!Array.isArray(results)) {
+      results = [];
+    }
+    
     const totalRecords = results.length;
     
     if (totalRecords === 0) {
@@ -214,9 +264,11 @@ Data Summary: Analysis of ${totalRecords} records with ${numericColumns.length} 
    * Get numeric columns from results
    */
   private static getNumericColumns(results: any[]): string[] {
-    if (results.length === 0) return [];
+    if (!Array.isArray(results) || results.length === 0) return [];
 
     const firstRow = results[0];
+    if (!firstRow || typeof firstRow !== 'object') return [];
+
     return Object.entries(firstRow)
       .filter(([_, value]) => typeof value === 'number')
       .map(([key, _]) => key);
@@ -228,8 +280,15 @@ Data Summary: Analysis of ${totalRecords} records with ${numericColumns.length} 
   private static calculateMetrics(results: any[], numericColumns: string[]): Record<string, any> {
     const metrics: Record<string, any> = {};
 
+    if (!Array.isArray(results) || !Array.isArray(numericColumns)) {
+      return metrics;
+    }
+
     numericColumns.forEach(column => {
-      const values = results.map(row => row[column]).filter(val => typeof val === 'number');
+      const values = results
+        .filter(row => row && typeof row === 'object')
+        .map(row => row[column])
+        .filter(val => typeof val === 'number');
       
       if (values.length > 0) {
         const sum = values.reduce((a, b) => a + b, 0);

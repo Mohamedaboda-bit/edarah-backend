@@ -71,6 +71,7 @@ export class RAGController {
   static async connectDatabase(req: Request, res: Response) {
     try {
       const userId = (req as any).user?.userId;
+      console.log(userId)
       if (!userId) {
         return res.status(401).json({ success: false, error: 'User not authenticated' });
       }
@@ -479,7 +480,7 @@ export class RAGController {
   }
 
   /**
-   * Get current user's conversation history
+   * Get conversation history for a user
    */
   static async getConversationHistory(req: Request, res: Response) {
     try {
@@ -487,19 +488,185 @@ export class RAGController {
       if (!userId) {
         return res.status(401).json({ success: false, error: 'User not authenticated' });
       }
-      
-      const chatHistory = await loadConversationHistory(userId);
-      
-      return res.status(200).json({ 
-        success: true, 
-        data: { 
-          chatHistory: chatHistory || 'No conversation history available',
-          hasHistory: !!chatHistory
-        } 
+
+      const memory = getUserMemoryHelper(userId);
+      const memoryVariables = await memory.loadMemoryVariables({});
+      const chatHistory = memoryVariables.chat_history;
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          history: chatHistory || []
+        }
       });
+
     } catch (error) {
-      console.error('Error getting conversation history:', error);
-      return res.status(500).json({ success: false, error: 'Failed to get conversation history' });
+      console.error('Get conversation history error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to get conversation history',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Get cache statistics
+   */
+  static async getCacheStats(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+
+      const { CacheService } = await import('../utils/cacheService');
+      const stats = CacheService.getCacheStats(userId);
+      const size = CacheService.getCacheSize();
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          stats,
+          size,
+          userId
+        }
+      });
+
+    } catch (error) {
+      console.error('Get cache stats error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to get cache statistics',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Clear user cache
+   */
+  static async clearUserCache(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+
+      const { CacheService } = await import('../utils/cacheService');
+      CacheService.clearUserCache(userId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'User cache cleared successfully',
+        data: { userId }
+      });
+
+    } catch (error) {
+      console.error('Clear user cache error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to clear user cache',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Clear database cache
+   */
+  static async clearDatabaseCache(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      const { databaseId } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+
+      if (!databaseId) {
+        return res.status(400).json({ success: false, error: 'Database ID is required' });
+      }
+
+      const { CacheService } = await import('../utils/cacheService');
+      CacheService.invalidateDatabaseCache(userId, databaseId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Database cache cleared successfully',
+        data: { userId, databaseId }
+      });
+
+    } catch (error) {
+      console.error('Clear database cache error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to clear database cache',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Clear all cache (admin only)
+   */
+  static async clearAllCache(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+
+      // TODO: Add admin check here if needed
+      // const user = await prisma.users.findUnique({ where: { id: BigInt(userId) } });
+      // if (!user?.is_admin) {
+      //   return res.status(403).json({ success: false, error: 'Admin access required' });
+      // }
+
+      const { CacheService } = await import('../utils/cacheService');
+      CacheService.clearAllCache();
+
+      return res.status(200).json({
+        success: true,
+        message: 'All cache cleared successfully',
+        data: { clearedBy: userId }
+      });
+
+    } catch (error) {
+      console.error('Clear all cache error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to clear all cache',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Clean up expired cache entries
+   */
+  static async cleanupExpiredCache(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+
+      const { CacheService } = await import('../utils/cacheService');
+      CacheService.cleanupExpiredCache();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Expired cache entries cleaned up successfully'
+      });
+
+    } catch (error) {
+      console.error('Cleanup expired cache error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to cleanup expired cache',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   }
 } 
