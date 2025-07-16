@@ -6,8 +6,8 @@ import { OpenAIEmbeddings } from '@langchain/openai';
 
 // OpenAI API endpoints and model names
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
-const OPENAI_QUERY_MODEL = process.env.OPENAI_QUERY_MODEL || 'gpt-4o';
-const OPENAI_ANALYSIS_MODEL = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-mini';
+const OPENAI_QUERY_MODEL = process.env.OPENAI_QUERY_MODEL || 'gpt-4.1-nano';
+const OPENAI_ANALYSIS_MODEL = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4.1-nano';
 const OPENAI_EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -394,6 +394,39 @@ function formatSchemaAnalysisPrompt(params: { schema: string }) {
   return SCHEMA_ANALYSIS_TEMPLATE.replace('{schema}', params.schema);
 }
 
+const AI_TABLE_TEMPLATE = `You are an expert data analyst.
+
+You MUST return ONLY a JSON array of objects, nothing else.
+Do NOT return summaries, categories, explanations, or any other structure.
+Do NOT include keys like 'categories', 'suppliers', 'topProducts', 'chartData', or 'overallPerformance'.
+
+Each object in the array must have these fields:
+- Name (string)
+- Category (string)
+- Price (string, e.g., '55 L.E.')
+- Sales (string: 'Low', 'Mid', or 'High')
+- Expiry date (string, e.g., 'in 4 days')
+- Avg. profit (string, e.g., '+0.3%')
+- Warning (string: 'Low', 'Mid', or 'High')
+
+Sample output:
+[
+  {"Name": "Blueberry", "Category": "Fruit", "Price": "55 L.E.", "Sales": "Low", "Expiry date": "in 4 days", "Avg. profit": "+0.3%", "Warning": "Low"},
+  {"Name": "Blueberry", "Category": "Fruit", "Price": "55 L.E.", "Sales": "Low", "Expiry date": "in 4 days", "Avg. profit": "+0.3%", "Warning": "High"}
+]
+
+If you return anything other than the array above, the result will be discarded.
+
+Repeat: ONLY return the array, nothing else.
+
+Data:
+{data}
+`;
+
+export function formatAITablePrompt(params: { data: string }) {
+  return AI_TABLE_TEMPLATE.replace('{data}', params.data);
+}
+
 // Export formatting functions for use in ragService
 export const PROMPT_TEMPLATES = {
   formatSQLPrompt,
@@ -451,7 +484,7 @@ interface MinimalLLM {
 }
 
 // Your custom LLM
-class OpenAILLM implements MinimalLLM {
+export class OpenAILLM implements MinimalLLM {
   model: string;
   constructor(model: string) {
     this.model = model;

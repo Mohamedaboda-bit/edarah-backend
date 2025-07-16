@@ -25,7 +25,7 @@ interface AnalysisResult {
   error?: string;
 }
 
-async function getUserDatabase(userId: string, databaseId?: string) {
+export async function getUserDatabase(userId: string, databaseId?: string) {
   let userDatabase;
   if (databaseId) {
     userDatabase = await prisma.user_databases.findFirst({
