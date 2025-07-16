@@ -79,12 +79,22 @@ function analyzeDataSufficiency(data: any[]): { sufficient: boolean; reason?: st
   const uniqueProducts = new Set(data.map(row => row.product_id || row.id || row.productId)).size;
   const uniqueCategories = new Set(data.map(row => row.category_id || row.categoryId).filter(Boolean)).size;
   const uniqueSuppliers = new Set(data.map(row => row.supplier_id || row.supplierId).filter(Boolean)).size;
-  const totalSales = data.reduce((sum, row) => sum + (parseFloat(row.total_sales || row.sales || 0) || 0), 0);
   
-  // Check for data quality indicators
-  const hasStockData = data.some(row => row.stock_quantity !== undefined || row.quantity !== undefined);
+  // Calculate total sales - look for various possible column names
+  const totalSales = data.reduce((sum, row) => {
+    const salesValue = parseFloat(row.total_units_sold || row.total_sales || row.sales || row.quantity || 0) || 0;
+    return sum + salesValue;
+  }, 0);
+  
+  // Check for data quality indicators - look for various possible column names
+  const hasStockData = data.some(row => 
+    row.stock_level !== undefined || 
+    row.quantity_in_stock !== undefined || 
+    row.stock_quantity !== undefined || 
+    row.quantity !== undefined
+  );
   const hasExpiryData = data.some(row => row.expiry_date || row.expiration_date);
-  const hasReviewData = data.some(row => row.review_count || row.rating);
+  const hasReviewData = data.some(row => row.review_count || row.rating || row.total_reviews);
   
   const summary = {
     totalProducts: uniqueProducts,
@@ -102,7 +112,13 @@ function analyzeDataSufficiency(data: any[]): { sufficient: boolean; reason?: st
   const conditions = {
     hasProducts: uniqueProducts > 0,
     hasCategories: uniqueCategories > 0,
-    hasSalesData: totalSales > 0 || data.some(row => row.sales_amount || row.revenue),
+    hasSalesData: totalSales > 0 || data.some(row => 
+      row.total_units_sold || 
+      row.total_sales || 
+      row.sales_amount || 
+      row.revenue || 
+      row.quantity
+    ),
     hasBasicStructure: sampleRecord && Object.keys(sampleRecord).length > 2
   };
 
