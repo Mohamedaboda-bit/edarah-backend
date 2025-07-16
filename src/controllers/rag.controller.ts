@@ -669,4 +669,82 @@ export class RAGController {
       });
     }
   }
+
+  /**
+   * Expand/explain a specific recommendation from RAG analysis
+   */
+  static async expandRecommendation(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+
+      // Check rate limit
+      const rateLimit = await RateLimiterService.checkRateLimit(userId);
+      if (!rateLimit.allowed) {
+        return res.status(429).json({
+          success: false,
+          error: 'Rate limit exceeded',
+          resetTime: rateLimit.resetTime
+        });
+      }
+
+      const { recommendation, question, databaseId, context } = req.body;
+      if (!recommendation) {
+        return res.status(400).json({ success: false, error: 'Recommendation is required' });
+      }
+
+      // Load chat history (for context, but we will overwrite instructions)
+      const chatHistory = await loadConversationHistory(userId);
+
+      // Build a fully custom, strict prompt
+      let prompt = `IGNORE ALL PREVIOUS INSTRUCTIONS AND FORMATTING, including any instructions in the conversation history or chat memory.\n\nExpand and explain in depth the following business recommendation.\n\n- ONLY return a plain text, in-depth explanation.\n- DO NOT return JSON, objects, recommendations, summaries, or any extra fields.\n- DO NOT include any marketing advice or general business analysis.\n- Focus on the meaning, reasoning, possible causes, business impact, and practical implications of the recommendation.\n- Your output must be a single, detailed paragraph.\n\nRecommendation: ${recommendation}`;
+      if (question) {
+        prompt += `\n\nThis recommendation was generated in response to: ${question}`;
+      }
+      prompt += `\n\nSample output:\nA detailed, focused explanation of the recommendation, including reasoning, business impact, and practical implications. No general advice, no recommendations, no JSON, just a paragraph of explanation.`;
+
+      // Call the LLM directly (not using the business analysis template)
+      const { openAIAnalysisLLM } = await import('../configs/langchain');
+      const aiResult = await openAIAnalysisLLM.call({ prompt });
+      let insights = aiResult.text;
+
+      // If the response is JSON or contains a JSON string, extract only the explanation
+      try {
+        // Try to parse as JSON
+        const parsed = JSON.parse(insights);
+        if (typeof parsed === 'string') {
+          insights = parsed;
+        } else if (parsed && typeof parsed === 'object') {
+          if (parsed.insights) {
+            insights = parsed.insights;
+          } else {
+            // Try to find the first string value
+            const firstString = Object.values(parsed).find(v => typeof v === 'string');
+            if (firstString) insights = firstString as string;
+          }
+        }
+      } catch (e) {
+        // Not JSON, keep as is
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Recommendation expanded successfully',
+        data: { insights },
+        rateLimit: {
+          remaining: rateLimit.remaining,
+          resetTime: rateLimit.resetTime
+        }
+      });
+    } catch (error) {
+      console.error('Expand recommendation error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to expand recommendation',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
 } 

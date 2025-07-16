@@ -10,6 +10,9 @@ router.use(authenticateToken);
 // Main analysis endpoint
 router.post('/analyze', RAGController.analyzeData);
 
+// Expand/explain a recommendation endpoint
+router.post('/recommendation/explain', RAGController.expandRecommendation);
+
 // Database management endpoints
 router.post('/databases', RAGController.connectDatabase);
 router.get('/databases', RAGController.getUserDatabases);
