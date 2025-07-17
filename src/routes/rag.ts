@@ -10,6 +10,9 @@ router.use(authenticateToken);
 // Main analysis endpoint
 router.post('/analyze', RAGController.analyzeData);
 
+// Marketing plan endpoint
+router.post('/marketing-plan', RAGController.generateMarketingPlan);
+
 // Expand/explain a recommendation endpoint
 router.post('/recommendation/explain', RAGController.expandRecommendation);
 

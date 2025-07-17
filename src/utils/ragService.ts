@@ -243,131 +243,104 @@ export class RAGService {
       // Step 2: Get or refresh schema
       const schema = await this.getSchema(databaseInfo);
 
-      // Step 3: Check cache for complete query result (EXACT MATCH)
-      const schemaVersion = this.generateSchemaVersion(schema);
-      const cachedResult = CacheService.getCachedQueryResult(
-        request.userId,
-        databaseInfo.id,
-        request.question,
-        schemaVersion
-      );
-      if (cachedResult) {
-        console.log('Returning cached query result (exact match)');
-        return {
-          ...cachedResult.response,
-          query: cachedResult.sqlQuery
-        };
-      }
-
-      // Step 4: Semantic cache lookup (SIMILARITY MATCH)
-      const normalizedQuestion = request.question.toLowerCase().trim().replace(/\s+/g, ' ');
-      const questionEmbedding = (await getEmbeddings([normalizedQuestion]))[0];
-      const { entry: cachedEntry, similarity } = semanticCache.findMostSimilar(questionEmbedding);
-      console.log('Semantic cache similarity:', similarity);
-      if (cachedEntry && similarity > 0.85) {
-        console.log('Returning semantic cached result for similar question:', cachedEntry.question);
-        return cachedEntry.result;
-      }
-
-      // Step 5: Generate SQL query using manual prompt formatting and LLM call
+      // Step 3: SQL generation prompt with MySQL and status instructions
       const schemaDescription = this.formatSchemaForPrompt(schema);
-      // Dynamically add DB-specific instructions
       let dbInstructions = '';
       if (schema.databaseType === 'mysql') {
-        dbInstructions = `\n- Use only MySQL 8.0 compatible syntax.\n- Do not use multiple CTEs (WITH ... AS ...), use subqueries if needed.\n- Do not include explanations or comments, only the SQL statement.\n- ONLY generate SELECT queries, NEVER INSERT, UPDATE, or DELETE operations.`;
-      } else if (schema.databaseType === 'mongodb') {
-        dbInstructions = `\n- Return a MongoDB aggregation pipeline in the format: db.collectionName.aggregate([...])\n- Do not include explanations or comments, only the pipeline.\n- Use proper MongoDB aggregation operators like $match, $group, $project, etc.\n- Keep the pipeline simple and avoid complex nested structures.\n- Use double quotes for all strings and property names.\n- ONLY generate READ queries (aggregation pipelines), NEVER INSERT, UPDATE, or DELETE operations.\n- Example format: db.products.aggregate([{\"$group\": {\"_id\": \"$category\", \"count\": {\"$sum\": 1}}}])`;
-      } else if (schema.databaseType === 'postgresql') {
-        dbInstructions = `\n- Use PostgreSQL syntax.\n- Do not include explanations or comments, only the SQL statement.\n- ONLY generate SELECT queries, NEVER INSERT, UPDATE, or DELETE operations.\n- Quote table names with double quotes if they contain uppercase letters (e.g., \"Project_freelancer\").\n- Avoid using ENUM columns in WHERE clauses as they may cause compatibility issues.\n- Focus on numeric, text, and timestamp columns for filtering and analysis.\n- Keep queries simple and avoid complex JOINs that might return no results.\n- Start with basic queries on single tables, then add JOINs only if necessary.\n- For revenue analysis, focus on tables with financial data like freelancer_stats, payments, proposals.\n- Use LEFT JOINs instead of INNER JOINs to avoid losing data when relationships don't exist.`;
+        dbInstructions = `\n- Use only MySQL 8.0 compatible syntax.\n- Do not use multiple CTEs (WITH ... AS ...), use subqueries if needed.\n- Do not include explanations or comments, only the SQL statement.\n- ONLY generate SELECT queries, NEVER INSERT, UPDATE, or DELETE operations.\n- Do not use double quotes for table or column names. Use backticks or no quotes.\n- For order status, use actual values from the database: 'delivered', 'shipped', 'processing', etc. Do NOT use 'Completed'. If unsure, use IN ('delivered', 'shipped', 'processing').`;
       }
-      // ...add more for other databases as needed
       const prompt = PROMPT_TEMPLATES.formatSQLPrompt({
         schema: schemaDescription,
         question: request.question,
         databaseType: schema.databaseType,
         chatHistory: chatHistory
       }) + dbInstructions;
-      console.log('Prompt to OpenAI gpt-4.1-nano (SQL generation):\n', prompt);
+      console.log('Prompt to OpenAI (SQL generation):\n', prompt);
       let sqlResult = await openAIQueryLLM.call({ prompt });
-      console.log('Raw LLM response:', sqlResult.text);
-      // Strip code block markers and explanation from LLM output
-      let sqlQuery = sqlResult.text.trim();
-      sqlQuery = sqlQuery.replace(/```sql|```javascript|```/gi, '').trim();
-
-      // Handle different query types based on database
-      if (schema.databaseType === 'mongodb') {
-        const mongoMatch = sqlQuery.match(/db\.\w+\.aggregate\(\[[\s\S]*?\]\)/);
-        if (mongoMatch) {
-          sqlQuery = mongoMatch[0].trim();
-        }
+      let sqlQuery = sqlResult.text.trim().replace(/```sql|```javascript|```/gi, '').trim();
+      // Only allow SELECT queries for SQL databases
+      const sqlMatch = sqlQuery.match(/SELECT[\s\S]*/i);
+      if (sqlMatch) {
+        sqlQuery = sqlMatch[0].trim();
       } else {
-        // Only allow SELECT queries for SQL databases
-        const sqlMatch = sqlQuery.match(/SELECT[\s\S]*/i);
-        if (sqlMatch) {
-          sqlQuery = sqlMatch[0].trim();
-        } else {
-          throw new Error('Only SELECT queries are allowed for data analysis. No INSERT, UPDATE, or DELETE operations permitted.');
-        }
+        throw new Error('Only SELECT queries are allowed for data analysis. No INSERT, UPDATE, or DELETE operations permitted.');
       }
-      // Post-process query for PostgreSQL case sensitivity and enum handling
-      if (schema.databaseType === 'postgresql') {
-        sqlQuery = this.fixPostgreSQLTableNames(sqlQuery, schema);
-        // Temporarily disable enum handling to avoid errors
-        // sqlQuery = this.fixPostgreSQLEnumComparisons(sqlQuery, schema);
-        // Remove WHERE conditions that might filter out all data
-        sqlQuery = this.removeProblematicWhereConditions(sqlQuery);
+      // Post-process query for MySQL compatibility
+      if (schema.databaseType === 'mysql') {
+        sqlQuery = sqlQuery.replace(/"/g, '`'); // Replace double quotes with backticks
       }
-      // Basic SQL syntax validation
-      sqlQuery = this.validateAndFixSQLSyntax(sqlQuery);
       console.log('Final query to execute:', sqlQuery);
-      // Step 5: Execute query, with fallback if it fails
+      // Step 4: Execute query, with fallback if it fails
       let queryResult: any[] = [];
       let mainQueryResult;
       try {
         mainQueryResult = await this.executeQuery(databaseInfo, sqlQuery);
         console.log('Main SQL query result:', mainQueryResult);
-        // If query returns no results, try a simpler fallback query
+        // If query returns no results, try a less restrictive fallback query
         if (mainQueryResult.length === 0) {
-          console.log('Query returned no results, trying simpler fallback query...');
-          const fallbackQuery = this.generateSimpleFallbackQuery(schema, request.question);
+          console.log('Query returned no results, trying less restrictive fallback query...');
+          // Remove status filter if present
+          let fallbackQuery = sqlQuery.replace(/WHERE\s+o\.status\s*=\s*['\"]\w+['\"]/i, '');
+          // Or use IN ('delivered', 'shipped', 'processing')
+          if (fallbackQuery === sqlQuery) {
+            fallbackQuery = sqlQuery.replace(/WHERE\s+o\.status\s*=\s*['\"]\w+['\"]/i, "WHERE o.status IN ('delivered','shipped','processing')");
+          }
+          if (fallbackQuery === sqlQuery) {
+            // If no status filter, just remove WHERE clause
+            fallbackQuery = sqlQuery.replace(/WHERE[\s\S]*?(GROUP BY|ORDER BY|LIMIT)/i, '$1');
+          }
           console.log('Fallback query:', fallbackQuery);
-          const fallbackResult = await this.executeQuery(databaseInfo, fallbackQuery);
-          console.log('Fallback SQL query result:', fallbackResult);
+          let fallbackResult = [];
+          try {
+            fallbackResult = await this.executeQuery(databaseInfo, fallbackQuery);
+            console.log('Fallback SQL query result:', fallbackResult);
+          } catch (fallbackError) {
+            console.log('Fallback query failed:', fallbackError);
+          }
           // Use fallback only if it returns data
           queryResult = fallbackResult.length > 0 ? fallbackResult : mainQueryResult;
         } else {
           queryResult = mainQueryResult;
         }
-      } catch (error: any) {
+      } catch (error) {
         // If SQL execution fails, re-prompt LLM with error and ask for a fix
         const errorMsg = error instanceof Error ? error.message : String(error);
-        const fixPrompt = `${prompt}\n\nThe previous query failed with the following error for ${schema.databaseType}:\n${errorMsg}\nPlease fix the query for this database and return only the corrected query.`;
-        console.log('Re-prompting OpenAI gpt-4.1-nano (query fix):\n', fixPrompt);
+        const fixPrompt = `${prompt}\n\nThe previous query failed with the following error for ${schema.databaseType}:\n${errorMsg}\nPlease fix the query for this database and return only the corrected query.\n- Use only MySQL 8.0 compatible syntax.\n- Do not use multiple CTEs.\n- Do not use double quotes for table or column names.\n- Use IN ('delivered','shipped','processing') for order status if needed.`;
+        console.log('Re-prompting OpenAI (query fix):\n', fixPrompt);
         sqlResult = await openAIQueryLLM.call({ prompt: fixPrompt });
         sqlQuery = sqlResult.text.trim().replace(/```sql|```javascript|```/gi, '').trim();
-        // Handle different query types based on database
-        if (schema.databaseType === 'mongodb') {
-          const mongoMatch = sqlQuery.match(/db\.\w+\.aggregate\(\[[\s\S]*?\]\)/);
-          if (mongoMatch) {
-            sqlQuery = mongoMatch[0].trim();
-          }
+        // Only allow SELECT queries for SQL databases
+        const sqlMatch2 = sqlQuery.match(/SELECT[\s\S]*/i);
+        if (sqlMatch2) {
+          sqlQuery = sqlMatch2[0].trim();
         } else {
-          // Only allow SELECT queries for SQL databases
-          const sqlMatch2 = sqlQuery.match(/SELECT[\s\S]*/i);
-          if (sqlMatch2) {
-            sqlQuery = sqlMatch2[0].trim();
-          } else {
-            throw new Error('Only SELECT queries are allowed for data analysis. No INSERT, UPDATE, or DELETE operations permitted.');
-          }
+          throw new Error('Only SELECT queries are allowed for data analysis. No INSERT, UPDATE, or DELETE operations permitted.');
         }
-        // Post-process query for PostgreSQL case sensitivity and enum handling (fallback)
-        if (schema.databaseType === 'postgresql') {
-          sqlQuery = this.fixPostgreSQLTableNames(sqlQuery, schema);
-          sqlQuery = this.fixPostgreSQLEnumComparisons(sqlQuery, schema);
+        if (schema.databaseType === 'mysql') {
+          sqlQuery = sqlQuery.replace(/"/g, '`');
         }
-        // Basic SQL syntax validation (fallback)
-        sqlQuery = this.validateAndFixSQLSyntax(sqlQuery);
+        // Try executing the fixed query
         queryResult = await this.executeQuery(databaseInfo, sqlQuery);
+      }
+      // Step 5: Defensive: Ensure queryResult is always an array
+      if (!Array.isArray(queryResult)) {
+        if (queryResult === undefined || queryResult === null) {
+          queryResult = [];
+        } else {
+          queryResult = [queryResult];
+        }
+      }
+      console.log('SQL Results before formatting:', queryResult, 'Length:', queryResult.length);
+      // If after all attempts there is still no data, return a clear message to the user
+      if (queryResult.length === 0) {
+        return {
+          insights: 'No data found for your request. Please check your filters or ensure your database contains relevant data.',
+          recommendations: [],
+          dataSummary: { totalRecords: 0, keyMetrics: {} },
+          confidence: 2,
+          query: sqlQuery,
+          databaseInfo: { name: databaseInfo.name, type: databaseInfo.type }
+        };
       }
       // Step 6: Process results and add to vector store
       // Defensive: Ensure queryResult is always an array
@@ -460,19 +433,8 @@ export class RAGService {
       console.log('Saving conversation to memory for user:', request.userId);
       await saveConversation(request.userId, request.question, responseText);
       console.log('Conversation saved successfully');
-      // Step 9: Cache the SQL query if it was generated
-      if (!cachedResult) {
-        CacheService.cacheSQLQuery(
-          request.userId,
-          databaseInfo.id,
-          request.question,
-          sqlQuery,
-          schema,
-          databaseInfo.type
-        );
-      }
-      // Step 10: Cache the complete query result
-      const finalResponse = {
+      // Step 10: Return complete response
+      return {
         ...insights,
         query: sqlQuery,
         databaseInfo: {
@@ -480,17 +442,6 @@ export class RAGService {
           type: databaseInfo.type
         }
       };
-      CacheService.cacheQueryResult(
-        request.userId,
-        databaseInfo.id,
-        request.question,
-        finalResponse,
-        schemaVersion,
-        sqlQuery
-      );
-      // Step 11: Return complete response
-      semanticCache.add(normalizedQuestion, questionEmbedding, finalResponse);
-      return finalResponse;
     } catch (error) {
       console.error('Error processing database request:', error);
       throw error;
@@ -536,10 +487,7 @@ export class RAGService {
     }
   }
 
-  /**
-   * Get user's database information
-   */
-  private static async getUserDatabase(userId: string, databaseId?: string): Promise<DatabaseInfo> {
+  public static async getUserDatabase(userId: string, databaseId?: string): Promise<DatabaseInfo> {
     try {
       let userDatabase;
       
@@ -577,10 +525,7 @@ export class RAGService {
     }
   }
 
-  /**
-   * Get or refresh database schema
-   */
-  private static async getSchema(databaseInfo: DatabaseInfo): Promise<DatabaseSchema> {
+  public static async getSchema(databaseInfo: DatabaseInfo): Promise<DatabaseSchema> {
     try {
       // Check if we have a cached schema that's not too old (weekly refresh)
       const userDatabase = await prisma.user_databases.findUnique({
@@ -730,10 +675,7 @@ export class RAGService {
     }
   }
 
-  /**
-   * Format schema for AI prompt
-   */
-  private static formatSchemaForPrompt(schema: DatabaseSchema): string {
+  public static formatSchemaForPrompt(schema: DatabaseSchema): string {
     return schema.tables.map(table => {
       const columns = table.columns.map(col => {
         let typeDescription = col.type;

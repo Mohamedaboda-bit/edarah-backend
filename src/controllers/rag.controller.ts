@@ -747,4 +747,182 @@ export class RAGController {
       });
     }
   }
+
+  /**
+   * Generate a detailed marketing plan based on database data
+   */
+  static async generateMarketingPlan(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'User not authenticated' });
+      }
+
+      // Check rate limit
+      const rateLimit = await RateLimiterService.checkRateLimit(userId);
+      if (!rateLimit.allowed) {
+        return res.status(429).json({
+          success: false,
+          error: 'Rate limit exceeded',
+          resetTime: rateLimit.resetTime
+        });
+      }
+
+      const { question, databaseId } = req.body;
+      // 1. Get user's database info
+      const databaseInfo = await RAGService.getUserDatabase(userId, databaseId);
+      // 2. Get schema
+      const schema = await RAGService.getSchema(databaseInfo);
+      const schemaDescription = RAGService.formatSchemaForPrompt(schema);
+
+      // 3. LLM: Generate SQL query for marketing plan data (with MySQL instructions)
+      const { openAIQueryLLM, openAIAnalysisLLM } = await import('../configs/langchain');
+      let dbInstructions = '';
+      if (schema.databaseType === 'mysql') {
+        dbInstructions = `\n- Use only MySQL 8.0 compatible syntax.\n- Do not use multiple CTEs (WITH ... AS ...), use subqueries if needed.\n- Do not include explanations or comments, only the SQL statement.\n- ONLY generate SELECT queries, NEVER INSERT, UPDATE, or DELETE operations.\n- Do not use double quotes for table or column names. Use backticks or no quotes.\n- For order status, use actual values from the database: 'delivered', 'shipped', 'processing', etc. Do NOT use 'Completed'. If unsure, use IN ('delivered', 'shipped', 'processing').`;
+      }
+      const sqlPrompt = `You are a SQL expert. Generate a SQL query to extract ALL data needed to create a detailed marketing plan for this business. Consider product/service sector, competitors, sales, customer segments, regions, and any other relevant data. Use the provided schema.\n\nDatabase Schema:\n${schemaDescription}${dbInstructions}`;
+      const sqlResult = await openAIQueryLLM.call({ prompt: sqlPrompt });
+      let sqlQuery = sqlResult.text.trim().replace(/```sql|```/gi, '').trim();
+      // Only allow SELECT queries
+      const sqlMatch = sqlQuery.match(/SELECT[\s\S]*/i);
+      if (sqlMatch) {
+        sqlQuery = sqlMatch[0].trim();
+      } else {
+        throw new Error('Only SELECT queries are allowed for marketing plan generation.');
+      }
+      if (schema.databaseType === 'mysql') {
+        sqlQuery = sqlQuery.replace(/"/g, '`');
+      }
+      // Remove or comment out all console.log statements related to SQL and data in generateMarketingPlan
+      let queryResult: any[] = [];
+      let mainQueryResult;
+      let sqlError = null;
+      try {
+        mainQueryResult = await DatabaseConnectionService.executeQuery(databaseInfo.connectionString, databaseInfo.type, sqlQuery);
+        if (mainQueryResult.length === 0) {
+          // Remove status filter if present
+          let fallbackQuery = sqlQuery.replace(/WHERE\s+o\.status\s*=\s*['\"]\w+['\"]/i, '');
+          if (fallbackQuery === sqlQuery) {
+            fallbackQuery = sqlQuery.replace(/WHERE\s+o\.status\s*=\s*['\"]\w+['\"]/i, "WHERE o.status IN ('delivered','shipped','processing')");
+          }
+          if (fallbackQuery === sqlQuery) {
+            fallbackQuery = sqlQuery.replace(/WHERE[\s\S]*?(GROUP BY|ORDER BY|LIMIT)/i, '$1');
+          }
+          let fallbackResult = [];
+          try {
+            fallbackResult = await DatabaseConnectionService.executeQuery(databaseInfo.connectionString, databaseInfo.type, fallbackQuery);
+          } catch (fallbackError) {
+            console.log('Fallback query failed:', fallbackError);
+          }
+          queryResult = fallbackResult.length > 0 ? fallbackResult : mainQueryResult;
+        } else {
+          queryResult = mainQueryResult;
+        }
+      } catch (error) {
+        sqlError = error;
+        // If SQL execution fails, re-prompt LLM with explicit alias/column instructions
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const fixPrompt = `${sqlPrompt}\n\nThe previous query failed with the following error for ${schema.databaseType}:\n${errorMsg}\nYou used an alias or column that does not exist or is not defined at the point of use. Double-check that all table aliases are defined before use, all columns referenced in JOINs exist in the correct tables, and fix any alias/column issues. Use only MySQL 8.0 compatible syntax. Do not use multiple CTEs. Do not use double quotes for table or column names. Use IN ('delivered','shipped','processing') for order status if needed.`;
+        try {
+          const fixResult = await openAIQueryLLM.call({ prompt: fixPrompt });
+          sqlQuery = fixResult.text.trim().replace(/```sql|```/gi, '').trim();
+          const sqlMatch2 = sqlQuery.match(/SELECT[\s\S]*/i);
+          if (sqlMatch2) {
+            sqlQuery = sqlMatch2[0].trim();
+          } else {
+            throw new Error('Only SELECT queries are allowed for marketing plan generation.');
+          }
+          if (schema.databaseType === 'mysql') {
+            sqlQuery = sqlQuery.replace(/"/g, '`');
+          }
+          queryResult = await DatabaseConnectionService.executeQuery(databaseInfo.connectionString, databaseInfo.type, sqlQuery);
+        } catch (secondError) {
+          // If the LLM fails twice, fall back to a simple query
+          let fallbackQuery = '';
+          if (schema.tables.some(t => t.name === 'products')) {
+            fallbackQuery = 'SELECT name, description, price FROM products LIMIT 10;';
+          } else if (schema.tables.some(t => t.name === 'services')) {
+            fallbackQuery = 'SELECT name, description, sales_price as price FROM services LIMIT 10;';
+          } else {
+            fallbackQuery = 'SELECT * FROM information_schema.tables LIMIT 10;';
+          }
+          try {
+            queryResult = await DatabaseConnectionService.executeQuery(databaseInfo.connectionString, databaseInfo.type, fallbackQuery);
+          } catch (finalError) {
+            // If even the fallback fails, return a clear error
+            return res.status(500).json({
+              success: false,
+              error: 'Failed to generate marketing plan',
+              message: finalError instanceof Error ? finalError.message : 'Unknown error'
+            });
+          }
+        }
+      }
+      if (!Array.isArray(queryResult)) {
+        if (queryResult === undefined || queryResult === null) {
+          queryResult = [];
+        } else {
+          queryResult = [queryResult];
+        }
+      }
+      // Remove or comment out all console.log statements related to SQL and data in generateMarketingPlan
+      if (queryResult.length === 0) {
+        return res.status(200).json({
+          success: false,
+          error: 'No data found for your request. Please check your filters or ensure your database contains relevant data.',
+          plan: '',
+          imageUrl: '',
+          query: sqlQuery,
+          rateLimit: {
+            remaining: rateLimit.remaining,
+            resetTime: rateLimit.resetTime
+          }
+        });
+      }
+
+      // 5. LLM: Generate marketing plan
+      const dataContext = Array.isArray(queryResult) ? JSON.stringify(queryResult, null, 2) : String(queryResult);
+      const planPrompt = `You are a world-class marketing strategist. Based on the following business data, generate a detailed, actionable marketing plan.\n\n- The plan MUST be highly specific to the actual data provided below (products, services, sales, customer segments, etc.).\n- Reference and leverage the actual data in your recommendations, strategies, and analysis.\n- Do NOT give generic advice—tailor every section to the data.\n- Format the output for chat display: use section titles, headers, bullet points, numbered lists, and terminal-like diagrams (ASCII art) where useful.\n- Use markdown for formatting.\n- Do NOT return JSON.\n- Make the plan as rich and visually engaging as possible, like a ChatGPT response.\n\nBusiness Data:\n${dataContext}`;
+      const planResult = await openAIAnalysisLLM.call({ prompt: planPrompt });
+      const plan = planResult.text;
+
+      // 6. Generate DALL-E 3 image
+      // Always extract the top 3 most frequent product/service names
+      let productNames: string[] = [];
+      if (Array.isArray(queryResult) && queryResult.length > 0) {
+        const nameCounts: Record<string, number> = {};
+        queryResult.forEach(row => {
+          const name = row.product_name || row.name || row.service_name;
+          if (name && typeof name === 'string') {
+            nameCounts[name] = (nameCounts[name] || 0) + 1;
+          }
+        });
+        productNames = Object.entries(nameCounts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([name]) => name)
+          .slice(0, 3);
+      }
+      const { generateDalleImage } = await import('../utils/marketingImage');
+      const imageUrl = await generateDalleImage('', productNames);
+
+      return res.status(200).json({
+        success: true,
+        plan,
+        imageUrl,
+        query: sqlQuery,
+        rateLimit: {
+          remaining: rateLimit.remaining,
+          resetTime: rateLimit.resetTime
+        }
+      });
+    } catch (error) {
+      console.error('Marketing plan generation error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate marketing plan',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
 } 
