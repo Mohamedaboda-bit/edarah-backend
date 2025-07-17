@@ -71,7 +71,7 @@ export class RAGController {
   static async connectDatabase(req: Request, res: Response) {
     try {
       const userId = (req as any).user?.userId;
-      console.log(userId)
+      // console.log(userId)
       if (!userId) {
         return res.status(401).json({ success: false, error: 'User not authenticated' });
       }
@@ -768,7 +768,7 @@ export class RAGController {
         });
       }
 
-      const { question, databaseId } = req.body;
+      const { question, databaseId, generateImage } = req.body;
       // 1. Get user's database info
       const databaseInfo = await RAGService.getUserDatabase(userId, databaseId);
       // 2. Get schema
@@ -887,24 +887,27 @@ export class RAGController {
       const planResult = await openAIAnalysisLLM.call({ prompt: planPrompt });
       const plan = planResult.text;
 
-      // 6. Generate DALL-E 3 image
-      // Always extract the top 3 most frequent product/service names
-      let productNames: string[] = [];
-      if (Array.isArray(queryResult) && queryResult.length > 0) {
-        const nameCounts: Record<string, number> = {};
-        queryResult.forEach(row => {
-          const name = row.product_name || row.name || row.service_name;
-          if (name && typeof name === 'string') {
-            nameCounts[name] = (nameCounts[name] || 0) + 1;
-          }
-        });
-        productNames = Object.entries(nameCounts)
-          .sort((a, b) => b[1] - a[1])
-          .map(([name]) => name)
-          .slice(0, 3);
+      // 6. Generate DALL-E 3 image only if generateImage is true (default: true)
+      let imageUrl = '';
+      if (generateImage !== false) {
+        // Always extract the top 3 most frequent product/service names
+        let productNames: string[] = [];
+        if (Array.isArray(queryResult) && queryResult.length > 0) {
+          const nameCounts: Record<string, number> = {};
+          queryResult.forEach(row => {
+            const name = row.product_name || row.name || row.service_name;
+            if (name && typeof name === 'string') {
+              nameCounts[name] = (nameCounts[name] || 0) + 1;
+            }
+          });
+          productNames = Object.entries(nameCounts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name]) => name)
+            .slice(0, 3);
+        }
+        const { generateDalleImage } = await import('../utils/marketingImage');
+        imageUrl = await generateDalleImage('', productNames);
       }
-      const { generateDalleImage } = await import('../utils/marketingImage');
-      const imageUrl = await generateDalleImage('', productNames);
 
       return res.status(200).json({
         success: true,
