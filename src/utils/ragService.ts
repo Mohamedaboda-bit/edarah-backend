@@ -1028,4 +1028,22 @@ export class RAGService {
       throw new Error('Failed to clear vector store');
     }
   }
+
+  /**
+   * Extract table names from a SQL query (supports FROM, JOIN, UPDATE, INTO)
+   */
+  public static extractTableNamesFromSQL(sqlQuery: string): string[] {
+    if (!sqlQuery) return [];
+    const tableNames = new Set<string>();
+    // Match FROM, JOIN, UPDATE, INTO (ignore subqueries and aliases)
+    const regex = /\b(?:FROM|JOIN|UPDATE|INTO)\s+([`'"]?\w+[`'"]?)/gi;
+    let match;
+    while ((match = regex.exec(sqlQuery)) !== null) {
+      let table = match[1];
+      // Remove quotes/backticks
+      table = table.replace(/^[`'"]|[`'"]$/g, '');
+      tableNames.add(table);
+    }
+    return Array.from(tableNames);
+  }
 } 

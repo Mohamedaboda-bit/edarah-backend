@@ -45,10 +45,17 @@ export class RAGController {
 
       const result = await RAGService.processRequest(ragRequest);
 
+      // Extract tables used if a query is present
+      let tablesUsed: string[] = [];
+      if (result.query) {
+        tablesUsed = RAGService.extractTableNamesFromSQL(result.query);
+        delete result.query;
+      }
+
       return res.status(200).json({
         success: true,
         message: 'Analysis completed successfully',
-        data: result,
+        data: { ...result, tablesUsed },
         rateLimit: {
           remaining: rateLimit.remaining,
           resetTime: rateLimit.resetTime
@@ -1080,11 +1087,15 @@ Generate a MASSIVE, comprehensive marketing plan that would be suitable for pres
         imageUrl = await generateDalleImage('', productNames);
       }
 
+      // After generating the plan and before returning the response
+      // Extract tables used from the SQL query
+      const tablesUsed = RAGService.extractTableNamesFromSQL(sqlQuery);
+
       return res.status(200).json({
         success: true,
         plan,
         imageUrl,
-        query: sqlQuery,
+        tablesUsed,
         rateLimit: {
           remaining: rateLimit.remaining,
           resetTime: rateLimit.resetTime

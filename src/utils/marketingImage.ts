@@ -10,9 +10,9 @@ export async function generateDalleImage(
   if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
   let imagePrompt = '';
   if (productNames && productNames.length > 0) {
-    imagePrompt = `A modern, visually appealing hero image for a website or social media, featuring ${productNames.join(', ')}, with a clean background and professional, inviting style. No charts, diagrams, or text—just the products/services presented attractively for marketing use.`;
+    imagePrompt = `A creative, eye-catching social media post image featuring ${productNames.join(', ')}, with a clean background and a modern, slightly artistic style. The image should be visually engaging, imaginative, and suitable for sharing on Instagram, Facebook, or LinkedIn. No charts, diagrams, or text—just the products/services presented in a unique, attractive way for marketing.`;
   } else {
-    imagePrompt = 'A modern, visually appealing hero image for a website or social media, with a clean background and professional, inviting style. No charts, diagrams, or text—just attractive products or services.';
+    imagePrompt = 'A creative, eye-catching social media post image with a clean background and a modern, slightly artistic style. The image should be visually engaging, imaginative, and suitable for sharing on Instagram, Facebook, or LinkedIn. No charts, diagrams, or text—just attractive products or services presented in a unique, marketing-focused way.';
   }
   if (basePrompt && basePrompt.trim().length > 0) {
     imagePrompt = `${imagePrompt} ${basePrompt}`;
