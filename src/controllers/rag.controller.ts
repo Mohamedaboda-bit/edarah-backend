@@ -881,10 +881,181 @@ export class RAGController {
         });
       }
 
-      // 5. LLM: Generate marketing plan
+      // 5. LLM: Generate detailed marketing plan using GPT-4o
       const dataContext = Array.isArray(queryResult) ? JSON.stringify(queryResult, null, 2) : String(queryResult);
-      const planPrompt = `You are a world-class marketing strategist. Based on the following business data, generate a detailed, actionable marketing plan.\n\n- The plan MUST be highly specific to the actual data provided below (products, services, sales, customer segments, etc.).\n- Reference and leverage the actual data in your recommendations, strategies, and analysis.\n- Do NOT give generic advice—tailor every section to the data.\n- Format the output for chat display: use section titles, headers, bullet points, numbered lists, and terminal-like diagrams (ASCII art) where useful.\n- Use markdown for formatting.\n- Do NOT return JSON.\n- Make the plan as rich and visually engaging as possible, like a ChatGPT response.\n\nBusiness Data:\n${dataContext}`;
-      const planResult = await openAIAnalysisLLM.call({ prompt: planPrompt });
+      
+      // Create a comprehensive marketing plan prompt with specific requirements
+      const detailedPlanPrompt = `You are a world-class marketing strategist and business consultant with 20+ years of experience. Based on the following business data, generate a MASSIVE, comprehensive, highly detailed, and actionable marketing plan that is at least 3-4 times larger than a standard marketing plan.
+
+BUSINESS DATA ANALYSIS:
+${dataContext}
+
+REQUIREMENTS FOR THE MARKETING PLAN:
+
+1. **EXECUTIVE SUMMARY** (4-5 detailed paragraphs)
+   - Comprehensive business insights and data analysis
+   - Current market position assessment with specific metrics
+   - Critical opportunities and challenges identified with data backing
+   - Key performance indicators and success metrics
+   - Strategic vision and mission alignment
+
+2. **MARKET ANALYSIS** (Extensive detailed section)
+   - Target market identification with detailed demographics and psychographics
+   - Competitive landscape analysis with specific competitor profiles
+   - Market trends and opportunities with industry-specific insights
+   - Customer segmentation analysis with behavioral patterns
+   - Market size and growth potential analysis
+   - Geographic market analysis and expansion opportunities
+   - Seasonal trends and cyclical patterns
+   - Regulatory environment and compliance considerations
+
+3. **PRODUCT/SERVICE STRATEGY** (Comprehensive recommendations)
+   - Detailed product portfolio analysis with performance metrics
+   - Pricing strategy recommendations with competitive analysis
+   - Product positioning and differentiation strategies
+   - New product development roadmap and innovation pipeline
+   - Inventory and supply chain optimization strategies
+   - Product lifecycle management and phase-out strategies
+   - Quality assurance and customer satisfaction metrics
+   - Product bundling and cross-selling opportunities
+   - Service delivery optimization and customer experience enhancement
+
+4. **CUSTOMER ACQUISITION STRATEGY** (Extensive tactics)
+   - Digital marketing channels with detailed implementation plans
+   - Content marketing strategy with content calendar and themes
+   - Lead generation tactics with specific conversion funnel optimization
+   - Customer acquisition cost optimization and ROI analysis
+   - Referral and partnership programs with incentive structures
+   - Influencer marketing and brand ambassador programs
+   - Event marketing and trade show strategies
+   - Public relations and media outreach campaigns
+   - Affiliate marketing and commission structures
+   - Mobile marketing and app-based acquisition strategies
+
+5. **CUSTOMER RETENTION & LOYALTY** (Comprehensive programs)
+   - Customer lifecycle management with detailed journey mapping
+   - Loyalty program design with tier structures and rewards
+   - Customer service excellence initiatives and training programs
+   - Upselling and cross-selling strategies with specific tactics
+   - Customer feedback and improvement systems
+   - Customer advocacy and word-of-mouth programs
+   - Personalized marketing and recommendation engines
+   - Customer education and onboarding programs
+   - Community building and engagement strategies
+   - Customer win-back and reactivation campaigns
+
+6. **SALES STRATEGY** (Extensive revenue optimization)
+   - Sales process optimization with detailed workflow analysis
+   - Sales team training and development programs with curriculum
+   - Sales forecasting and goal setting with predictive analytics
+   - Commission and incentive structures with performance metrics
+   - Sales technology and CRM optimization with specific tools
+   - Territory management and account assignment strategies
+   - Sales enablement and content development
+   - Pipeline management and lead qualification processes
+   - Sales performance analytics and reporting systems
+   - Channel partner and distributor strategies
+
+7. **DIGITAL TRANSFORMATION** (Comprehensive technology integration)
+   - E-commerce optimization strategies with conversion rate optimization
+   - Mobile marketing and app development with user experience design
+   - Data analytics and business intelligence with dashboard development
+   - Marketing automation implementation with workflow design
+   - Customer experience (CX) enhancement with journey optimization
+   - Artificial intelligence and machine learning applications
+   - Social media management and community engagement
+   - Email marketing automation and personalization
+   - Search engine optimization and content strategy
+   - Paid advertising and PPC campaign management
+
+8. **BUDGET ALLOCATION** (Detailed financial planning)
+   - Marketing budget breakdown by channel with specific allocations
+   - ROI projections and measurement metrics with tracking systems
+   - Cost-per-acquisition targets with optimization strategies
+   - Revenue growth projections with scenario analysis
+   - Resource allocation recommendations with staffing plans
+   - Marketing technology stack investment and ROI analysis
+   - Contingency budget planning and risk mitigation
+   - Performance-based budget allocation and optimization
+   - Cross-channel budget optimization and attribution modeling
+   - Long-term investment planning and capital allocation
+
+9. **IMPLEMENTATION TIMELINE** (Comprehensive action plan)
+   - 30-day immediate action items with daily/weekly milestones
+   - 90-day short-term goals with monthly checkpoints
+   - 6-month medium-term objectives with quarterly reviews
+   - 12-month long-term vision with annual planning cycles
+   - Key milestones and success metrics with tracking systems
+   - Resource allocation and team assignment schedules
+   - Technology implementation and training timelines
+   - Performance measurement and optimization cycles
+   - Risk mitigation and contingency planning schedules
+   - Stakeholder communication and reporting schedules
+
+10. **RISK MANAGEMENT** (Extensive contingency planning)
+    - Market risks and mitigation strategies with scenario planning
+    - Competitive threats and responses with monitoring systems
+    - Technology risks and backup plans with disaster recovery
+    - Financial risks and safeguards with insurance and hedging
+    - Crisis management protocols with communication strategies
+    - Regulatory compliance and legal risk management
+    - Supply chain risks and alternative sourcing strategies
+    - Cybersecurity and data protection measures
+    - Reputation management and brand protection strategies
+    - Operational risks and business continuity planning
+
+11. **PERFORMANCE MEASUREMENT & ANALYTICS** (Comprehensive tracking)
+    - Key Performance Indicators (KPIs) with specific targets
+    - Marketing attribution and ROI measurement systems
+    - Customer lifetime value analysis and optimization
+    - Conversion funnel analysis and optimization
+    - A/B testing strategies and statistical significance
+    - Real-time dashboard development and reporting
+    - Predictive analytics and forecasting models
+    - Competitive benchmarking and market intelligence
+    - Customer satisfaction and Net Promoter Score tracking
+    - Marketing efficiency and productivity metrics
+
+12. **ORGANIZATIONAL STRUCTURE & TEAM DEVELOPMENT** (Detailed planning)
+    - Marketing team structure and role definitions
+    - Skills development and training programs
+    - Performance management and incentive systems
+    - Cross-functional collaboration and communication
+    - Agency and vendor management strategies
+    - Knowledge management and best practices sharing
+    - Innovation and creative development processes
+    - Change management and organizational development
+    - Leadership development and succession planning
+    - Culture building and team engagement strategies
+
+FORMATTING REQUIREMENTS:
+- Use rich markdown formatting with headers, subheaders, bullet points, and numbered lists
+- Include specific data references and metrics from the provided business data
+- Use tables, charts (ASCII art), and visual elements where appropriate
+- Make each recommendation specific and actionable with implementation steps
+- Include success metrics and KPIs for each strategy with specific targets
+- Use professional business language while remaining engaging and readable
+- Structure the plan for easy reading and implementation with clear sections
+- Include detailed examples and case studies where relevant
+- Provide step-by-step implementation guides for complex strategies
+- Include troubleshooting guides and common pitfalls to avoid
+
+IMPORTANT:
+- Every recommendation MUST be based on the actual data provided
+- Reference specific products, services, sales figures, and customer data throughout
+- Provide concrete, implementable actions with specific timelines and responsibilities
+- Include specific timelines, budgets, and success metrics for every strategy
+- Make the plan comprehensive enough for immediate implementation by multiple teams
+- Include detailed cost-benefit analysis for major initiatives
+- Provide alternative strategies and contingency plans for critical areas
+- Include stakeholder communication plans and change management strategies
+
+Generate a MASSIVE, comprehensive marketing plan that would be suitable for presentation to senior management, board of directors, and immediate execution by multiple marketing teams. This should be the most detailed and actionable marketing plan possible, covering every aspect of modern marketing strategy and implementation.`;
+      
+      // Use GPT-4o for enhanced marketing plan generation
+      const { OpenAILLM } = await import('../configs/langchain');
+      const gpt4oLLM = new OpenAILLM('gpt-4o');
+      const planResult = await gpt4oLLM.call({ prompt: detailedPlanPrompt });
       const plan = planResult.text;
 
       // 6. Generate DALL-E 3 image only if generateImage is true (default: true)
