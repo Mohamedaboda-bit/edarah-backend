@@ -97,7 +97,7 @@ export class RAGController {
       // Check user's database limit
       const userPlan = await prisma.user_plans.findFirst({
         where: {
-          user_id: BigInt(userId),
+          user_id: BigInt(userId.toString()),
           is_active: true
         },
         include: {
@@ -108,7 +108,7 @@ export class RAGController {
       if (userPlan) {
         const currentDatabases = await prisma.user_databases.count({
           where: {
-            user_id: BigInt(userId),
+            user_id: BigInt(userId.toString()),
             is_active: true
           }
         });
@@ -139,7 +139,7 @@ export class RAGController {
       // Check if database already exists for this user
       const existingDatabase = await prisma.user_databases.findFirst({
         where: {
-          user_id: BigInt(userId),
+          user_id: BigInt(userId.toString()),
           database_name: extractedDbName,
           is_active: true
         }
@@ -162,7 +162,7 @@ export class RAGController {
         // Create new database
         userDatabase = await prisma.user_databases.create({
           data: {
-            user_id: BigInt(userId),
+            user_id: BigInt(userId.toString()),
             database_type: databaseType,
             connection_string: encryptedConnectionString,
             database_name: extractedDbName,
@@ -205,7 +205,7 @@ export class RAGController {
 
       const databases = await prisma.user_databases.findMany({
         where: {
-          user_id: BigInt(userId),
+          user_id: BigInt(userId.toString()),
           is_active: true
         },
         select: {
@@ -257,7 +257,7 @@ export class RAGController {
       const userDatabase = await prisma.user_databases.findFirst({
         where: {
           id: BigInt(databaseId),
-          user_id: BigInt(userId),
+          user_id: BigInt(userId.toString()),
           is_active: true
         }
       });
@@ -315,7 +315,7 @@ export class RAGController {
       const userDatabase = await prisma.user_databases.findFirst({
         where: {
           id: BigInt(databaseId),
-          user_id: BigInt(userId),
+          user_id: BigInt(userId.toString()),
           is_active: true
         }
       });

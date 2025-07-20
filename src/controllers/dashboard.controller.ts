@@ -16,7 +16,7 @@ export const dashboardAnalysis = async (req: Request, res: Response) => {
     }
     // Optionally support databaseId override
     const databaseId = req.query.databaseId || req.body.databaseId;
-    const result = await getDashboardAnalysis({ userId, databaseId });
+    const result = await getDashboardAnalysis({ userId: userId.toString(), databaseId });
     
     if (result.insufficientData) {
       return res.status(200).json({ 
@@ -44,7 +44,7 @@ export const getAITable = async (req: Request, res: Response) => {
     }
     const databaseId = req.query.databaseId || req.body.databaseId;
     // Get user DB info
-    const databaseInfo = await getUserDatabase(userId, databaseId);
+    const databaseInfo = await getUserDatabase(userId.toString(), databaseId);
     // Query all products with category, inventory, and sales info
     const query = `
       SELECT 
@@ -67,9 +67,25 @@ export const getAITable = async (req: Request, res: Response) => {
     const aiResult = await new OpenAILLM('gpt-4.1-mini').call({ prompt: aiPrompt });
     let table;
     try {
-      table = typeof aiResult.text === 'string' ? JSON.parse(aiResult.text) : aiResult.text;
+      let responseText = aiResult.text;
+      
+      // Handle markdown-formatted JSON responses
+      if (typeof responseText === 'string') {
+        // Remove markdown code blocks
+        responseText = responseText.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+        // Remove any leading/trailing whitespace
+        responseText = responseText.trim();
+      }
+      
+      table = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
     } catch (e) {
-      return res.status(500).json({ message: 'AI response parsing failed', error: e instanceof Error ? e.message : e });
+      console.error('JSON parsing error:', e);
+      console.error('Raw LLM response:', aiResult.text);
+      return res.status(500).json({ 
+        message: 'AI response parsing failed', 
+        error: e instanceof Error ? e.message : e,
+        rawResponse: aiResult.text 
+      });
     }
     return res.status(200).json({ data: table });
   } catch (error) {
@@ -84,13 +100,16 @@ export const analyzeProduct = async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({ success: false, error: 'User not authenticated' });
     }
+    
+    // Ensure userId is properly converted to string for BigInt operations
+    const userIdString = userId.toString();
     const { productName, databaseId } = req.body;
     if (!productName) {
       return res.status(400).json({ success: false, error: 'Product name is required' });
     }
     // 1. Get user's database info
     const { RAGService } = await import('../utils/ragService');
-    const databaseInfo = await RAGService.getUserDatabase(userId, databaseId);
+    const databaseInfo = await RAGService.getUserDatabase(userIdString, databaseId);
     // 2. Get schema
     const schema = await RAGService.getSchema(databaseInfo);
     const schemaDescription = RAGService.formatSchemaForPrompt(schema);
@@ -154,9 +173,26 @@ export const analyzeProduct = async (req: Request, res: Response) => {
     const analysisResult = await openAIAnalysisLLM.call({ prompt: analysisPrompt });
     let structured;
     try {
-      structured = typeof analysisResult.text === 'string' ? JSON.parse(analysisResult.text) : analysisResult.text;
+      let responseText = analysisResult.text;
+      
+      // Handle markdown-formatted JSON responses
+      if (typeof responseText === 'string') {
+        // Remove markdown code blocks
+        responseText = responseText.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+        // Remove any leading/trailing whitespace
+        responseText = responseText.trim();
+      }
+      
+      structured = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
     } catch (e) {
-      return res.status(500).json({ success: false, error: 'Failed to parse LLM response', message: e instanceof Error ? e.message : e });
+      console.error('JSON parsing error:', e);
+      console.error('Raw LLM response:', analysisResult.text);
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Failed to parse LLM response', 
+        message: e instanceof Error ? e.message : e,
+        rawResponse: analysisResult.text 
+      });
     }
     return res.status(200).json({ success: true, data: structured });
   } catch (error) {
