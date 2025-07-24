@@ -427,6 +427,47 @@ export function formatAITablePrompt(params: { data: string }) {
   return AI_TABLE_TEMPLATE.replace('{data}', params.data);
 }
 
+const MARKETING_PLAN_TEMPLATE = `You are a world-class marketing strategist. Based on the following business data and previous analysis context, generate a comprehensive marketing plan.
+
+PREVIOUS ANALYSIS CONTEXT:
+{contextFromQA}
+
+BUSINESS DATA:
+{dataContext}
+
+Generate a MASSIVE, comprehensive marketing plan that specifically addresses the insights from the previous questions and answers, while incorporating the business data provided.
+
+INSTRUCTIONS:
+- Analyze the Q&A context to understand the business situation, challenges, opportunities, and current performance
+- Create a marketing plan that directly addresses the specific insights, problems, and opportunities identified in the Q&A context
+- Use the business data to support your recommendations with concrete metrics and evidence
+- Make every section highly detailed and actionable
+- Structure the plan based on what's most relevant to the Q&A insights (you decide the sections and focus areas)
+- Include specific implementation steps, timelines, budgets, and success metrics
+- Reference the Q&A findings throughout to show how each recommendation addresses specific business needs
+- Use rich markdown formatting with headers, subheaders, bullet points, numbered lists, and tables
+- Include visual elements like ASCII charts where helpful
+- Make recommendations specific to this business based on the Q&A analysis
+- Provide step-by-step implementation guides for complex strategies
+- Include troubleshooting guides and common pitfalls to avoid
+- Add case studies and examples where relevant
+- Ensure every recommendation has clear success metrics and KPIs
+
+IMPORTANT: 
+- Let the Q&A context guide what sections and strategies to focus on most heavily
+- Don't follow a rigid template - adapt the plan structure to what this specific business needs based on the analysis
+- Be extremely detailed and comprehensive - this should be suitable for presentation to senior management and immediate execution
+- Every section should reference and build upon the Q&A insights to create a highly targeted strategy
+- Include specific data references and metrics from the provided business data throughout
+
+Generate the most detailed and actionable marketing plan possible, covering every aspect that's relevant to this business based on the Q&A analysis.`;
+
+function formatMarketingPlanPrompt(params: { contextFromQA: string; dataContext: string }) {
+  return MARKETING_PLAN_TEMPLATE
+    .replace('{contextFromQA}', params.contextFromQA)
+    .replace('{dataContext}', params.dataContext);
+}
+
 // Export formatting functions for use in ragService
 export const PROMPT_TEMPLATES = {
   formatSQLPrompt,
@@ -434,6 +475,7 @@ export const PROMPT_TEMPLATES = {
   formatSchemaAnalysisPrompt,
   formatQuestionClassificationPrompt,
   formatGeneralKnowledgePrompt,
+  formatMarketingPlanPrompt,
 };
 
 // OpenAI LLM call helper
